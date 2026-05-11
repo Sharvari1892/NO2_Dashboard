@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>APIG — Air Pollution Intervention Grid</title>
+    <meta name="description" content="A real-time photocatalytic intervention system for urban NO2 pollution.">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,100..1000;1,9..40,100..1000&family=Fraunces:ital,opsz,wght@0,9..144,100..900;1,9..144,100..900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <main>
+        <!-- Section 1: Hero -->
+        <section id="hero" class="viewport-height">
+            <div class="container hero-grid">
+                <div class="hero-text">
+                    <h1 class="fraunces">Air comes in.<br>Less of it leaves.</h1>
+                    <p class="dm-sans subtitle">A real-time photocatalytic intervention system for urban NO₂ pollution.</p>
+                </div>
+                <div class="hero-visual">
+                    <!-- SVG Chamber will be here -->
+                    <svg id="chamber-svg" viewBox="0 0 600 300" preserveAspectRatio="xMidYMid meet">
+                        <!-- Technical Cutaway -->
+                        <rect x="50" y="100" width="500" height="100" fill="none" stroke="#2C2C28" stroke-width="2" />
+                        <rect x="50" y="100" width="500" height="100" fill="url(#tio2-pattern)" />
+                        
+                        <!-- UV Lamp Zone -->
+                        <rect id="uv-lamp" x="250" y="110" width="100" height="10" fill="#FFB700" opacity="0.3" rx="2" />
+                        <rect class="uv-active-zone" x="200" y="102" width="200" height="96" fill="#FFB700" opacity="0.05" />
+                        
+                        <!-- Patterns -->
+                        <defs>
+                            <pattern id="tio2-pattern" x="0" y="0" width="10" height="10" patternUnits="userSpaceOnUse">
+                                <path d="M-1,1 l2,-2 M0,10 l10,-10 M9,11 l2,-2" stroke="#2C2C28" stroke-width="0.5" opacity="0.1" />
+                            </pattern>
+                        </defs>
+
+                        <!-- Particles Group -->
+                        <g id="particles-in"></g>
+                        <g id="particles-out"></g>
+                    </svg>
+                </div>
+            </div>
+        </section>
+
+        <!-- Section 2: The Two Numbers -->
+        <section id="comparison" class="full-width bg-linen">
+            <div class="container comparison-grid">
+                <div class="comparison-side incoming">
+                    <span class="label dm-sans-caps">INCOMING NO₂</span>
+                    <div class="value-row">
+                        <span id="incoming-value" class="fraunces display-large">182</span>
+                        <span class="unit dm-sans">µg/m³</span>
+                    </div>
+                </div>
+                <div class="divider"></div>
+                <div class="comparison-side outgoing">
+                    <span class="label dm-sans-caps">OUTGOING NO₂</span>
+                    <div class="value-row">
+                        <span id="outgoing-value" class="fraunces display-large accent-green-text">47</span>
+                        <span class="unit dm-sans">µg/m³</span>
+                    </div>
+                </div>
+            </div>
+            <div class="reduction-bar-container">
+                <div id="reduction-bar-base" class="reduction-bar terracotta-bg"></div>
+                <div id="reduction-bar-active" class="reduction-bar clean-green-bg"></div>
+            </div>
+            <div class="reduction-percentage fraunces">
+                <span id="reduction-counter">0</span>% reduction
+            </div>
+        </section>
+
+        <!-- Section 3: The Process -->
+        <section id="process">
+            <div class="container">
+                <div class="process-track">
+                    <div class="process-rule"></div>
+                    <div class="process-stages">
+                        <div class="stage" data-index="01">
+                            <span class="stage-number">01</span>
+                            <h3 class="dm-sans">Polluted air enters</h3>
+                            <p class="dm-sans">Atmospheric intake captures urban air concentrated with nitrogen dioxide.</p>
+                        </div>
+                        <div class="stage" data-index="02">
+                            <span class="stage-number">02</span>
+                            <h3 class="dm-sans">Sensors detect</h3>
+                            <p class="dm-sans">High-precision gas sensors monitor NO₂, temperature, and flow velocity.</p>
+                        </div>
+                        <div class="stage" data-index="03">
+                            <span class="stage-number">03</span>
+                            <h3 class="dm-sans">STM32 decides</h3>
+                            <p class="dm-sans">Real-time processing calculates optimal UV intensity and residence time.</p>
+                        </div>
+                        <div class="stage" data-index="04">
+                            <span class="stage-number">04</span>
+                            <h3 class="dm-sans">UV activates</h3>
+                            <p class="dm-sans">Photocatalytic TiO₂ coating triggers molecular degradation of pollutants.</p>
+                        </div>
+                        <div class="stage" data-index="05">
+                            <span class="stage-number">05</span>
+                            <h3 class="dm-sans">Cleaner air exits</h3>
+                            <p class="dm-sans">Processed air is released back into the urban environment with significantly lower NO₂.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Section 4: Live Data -->
+        <section id="live-data">
+            <div class="container live-grid">
+                <div class="live-column main-readout">
+                    <span class="label dm-sans-caps">CURRENT NO₂ LEVEL</span>
+                    <div id="current-no2-readout" class="dm-mono display-med">182.00</div>
+                    <div class="barcode-container">
+                        <div id="barcode-chart"></div>
+                    </div>
+                </div>
+                <div class="live-column sub-readouts">
+                    <div class="chamber-specs-container">
+                        <span class="label dm-sans-caps">SYSTEM SCHEMATIC — INTERACTIVE 3D</span>
+                        <div id="schematic-viewport" class="schematic-container">
+                            <div id="schematic-canvas"></div>
+                            
+                            <!-- 3D Component Labels (Dynamic) -->
+                            <div id="schematic-labels"></div>
+                            
+                            <!-- UI Controls Overlay -->
+                            <div class="schematic-ui">
+                                <div class="ui-toggles">
+                                    <label class="toggle-item"><input type="checkbox" id="toggle-wiring" checked> <span>Show wiring</span></label>
+                                    <label class="toggle-item"><input type="checkbox" id="toggle-explode"> <span>Explode view</span></label>
+                                    <label class="toggle-item"><input type="checkbox" id="toggle-live" checked> <span>Live data</span></label>
+                                </div>
+                                <div class="ui-readout dm-mono">
+                                    IN: <span id="ui-in-val">182</span> µg/m³ · OUT: <span id="ui-out-val">47</span> µg/m³
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="data-pair uv-status-pair">
+                        <span class="label dm-sans-caps">UV SYSTEM STATUS</span>
+                        <div id="uv-status" class="fraunces status-text">active</div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Section 5: Editorial -->
+        <section id="how-it-works" class="editorial">
+            <div class="container editorial-grid">
+                <div class="editorial-column">
+                    <h2 class="dm-sans">The Mechanics of Photocatalysis</h2>
+                    <p>The intervention grid utilizes a heterogeneous photocatalytic process. When ultraviolet (UV) light illuminates the Titanium Dioxide (TiO₂) coating, it generates electron-hole pairs. These highly reactive species interact with water vapor and oxygen in the air to produce hydroxyl radicals (•OH) and superoxide anions (O₂⁻).</p>
+                    <p>These powerful oxidants react with Nitrogen Dioxide (NO₂) molecules, converting them into non-toxic nitrates (NO₃⁻) which are adsorbed onto the surface of the grid, effectively removing the pollutant from the air stream.</p>
+                </div>
+                <div class="editorial-column">
+                    <div class="molecular-svg-container">
+                        <svg id="molecular-svg" viewBox="0 0 300 200">
+                            <!-- NO2 to Nitrate Schematic -->
+                            <circle cx="50" cy="100" r="10" fill="#C0412A" />
+                            <text x="45" y="105" fill="white" font-size="8" class="dm-sans">NO₂</text>
+                            
+                            <path d="M80 100 H150" stroke="#2C2C28" stroke-width="1" marker-end="url(#arrowhead)" />
+                            
+                            <rect x="180" y="80" width="80" height="40" fill="none" stroke="#2A6B47" stroke-width="1" />
+                            <text x="195" y="105" fill="#2A6B47" font-size="8" class="dm-sans">NO₃⁻ (Nitrates)</text>
+                            
+                            <defs>
+                                <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="0" refY="3.5" orient="auto">
+                                    <polygon points="0 0, 10 3.5, 0 7" fill="#2C2C28" />
+                                </marker>
+                            </defs>
+                        </svg>
+                    </div>
+                    <p>The STM32 microcontroller acts as the nervous system of the grid. By continuously monitoring environmental parameters, it dynamically adjusts the UV intensity to maintain optimal reaction rates while minimizing energy consumption. This closed-loop control ensures that the grid remains effective across varying urban conditions, from high-traffic peak hours to stagnant evening air.</p>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <footer class="container dm-sans footer-note">
+        <p>© 2026 Air Pollution Intervention Grid Research Group. APIG-01 Prototype.</p>
+    </footer>
+
+    <script type="module" src="script.js"></script>
+</body>
+</html>
