@@ -1,424 +1,706 @@
-import * as THREE from /* @vite-ignore */ 'https://cdn.skypack.dev/three@0.158.0';
-import { OrbitControls } from /* @vite-ignore */ 'https://cdn.skypack.dev/three@0.158.0/examples/jsm/controls/OrbitControls.js';
+// ═══════════════════════════════════════════════════
+//  APIG Dashboard · script.js
+//  1. Hero SVG Particle Animation
+//  2. Live Data Simulation (replace with WebSocket)
+//  3. Chart.js Time-Series Graphs
+//  4. Three.js 3D Schematic
+// ═══════════════════════════════════════════════════
 
-document.addEventListener('DOMContentLoaded', () => {
-    // 1. Particle Generation for Hero (Original Section 1 Logic)
-    const inGroup = document.getElementById('particles-in');
-    const outGroup = document.getElementById('particles-out');
-    
-    function createParticles(group, count, isClean = false) {
-        for (let i = 0; i < count; i++) {
-            const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
-            const r = 2 + Math.random() * 2;
-            const x = 50 + Math.random() * 50;
-            const y = 110 + Math.random() * 80;
-            
-            circle.setAttribute('cx', x);
-            circle.setAttribute('cy', y);
-            circle.setAttribute('r', r);
-            circle.classList.add('particle');
-            if (isClean) circle.classList.add('clean');
-            
-            const duration = 2.8 + Math.random() * 1.4;
-            const delay = Math.random() * 2;
-            circle.style.animationDuration = `${duration}s`;
-            circle.style.animationDelay = `${delay}s`;
-            group.appendChild(circle);
-        }
-    }
-    createParticles(inGroup, 20);
-    createParticles(outGroup, 20, true);
+// ─── Live data state ───────────────────────────────
+const state = {
+  no2In: 182,
+  no2Out: 47,
+  temp: 28.4,
+  pressure: 1013,
+  uvActive: true,
+  histNo2In: [],
+  histNo2Out: [],
+  histTemp: [],
+  histPressure: [],
+  labels: [],
+  maxPoints: 60
+};
 
-    // 2. Intersection Observer for Scroll Animations
-    const observerOptions = { threshold: 0.2 };
-    const observer = new IntersectionObserver((entries) => {
-        entries.forEach(entry => {
-            if (entry.isIntersecting) {
-                if (entry.target.id === 'comparison') animateComparison();
-                else if (entry.target.classList.contains('process-track')) animateProcess();
-                else if (entry.target.classList.contains('stage')) entry.target.classList.add('visible');
-            }
-        });
-    }, observerOptions);
+function simValue(base, noise, min, max) {
+  const v = base + (Math.random() - 0.5) * noise;
+  return Math.min(max, Math.max(min, Math.round(v * 10) / 10));
+}
 
-    observer.observe(document.getElementById('comparison'));
-    document.querySelectorAll('.stage').forEach(stage => observer.observe(stage));
-    observer.observe(document.querySelector('.process-track'));
+// ─── 1. HERO SVG PARTICLES ─────────────────────────
+(function initHeroParticles() {
+  const g = document.getElementById('particles');
+  if (!g) return;
 
-    function animateComparison() {
-        const bar = document.getElementById('reduction-bar-active');
-        const counter = document.getElementById('reduction-counter');
-        bar.style.width = '74%';
-        let count = 0;
-        const target = 74;
-        const duration = 1500;
-        const startTime = performance.now();
-        function updateCounter(currentTime) {
-            const elapsed = currentTime - startTime;
-            const progress = Math.min(elapsed / duration, 1);
-            counter.innerText = Math.floor(progress * target);
-            if (progress < 1) requestAnimationFrame(updateCounter);
-        }
-        requestAnimationFrame(updateCounter);
-    }
+  const DUCT_X1 = 82, DUCT_X2 = 618;
+  const DUCT_Y1 = 90, DUCT_Y2 = 178;
+  const UV_START = 265, UV_END = 435; // treatment zone x range
 
-    function animateProcess() {
-        const rule = document.querySelector('.process-rule');
-        rule.style.transform = 'scaleX(1)';
-    }
+  const NUM = 60;
+  const particles = [];
 
-    // 3. Live Data Simulation State
-    let currentIncoming = 182;
-    let currentOutgoing = 47;
-    let currentTemp = 24.2;
-    let currentPressure = 1013;
-    let history = [];
-    const maxHistory = 40;
+  for (let i = 0; i < NUM; i++) {
+    const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    circle.setAttribute('r', 4 + Math.random() * 3);
+    circle.setAttribute('opacity', 0.7 + Math.random() * 0.3);
+    g.appendChild(circle);
 
-    // 4. Three.js Interactive Schematic Implementation
-    const scene = new THREE.Scene();
-    const viewport = document.getElementById('schematic-viewport');
-    const canvas = document.getElementById('schematic-canvas');
-    const labelsContainer = document.getElementById('schematic-labels');
-    
-    const camera = new THREE.PerspectiveCamera(45, viewport.clientWidth / viewport.clientHeight, 0.1, 1000);
-    camera.position.set(6, 4, 8);
-
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: 'high-performance' });
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    renderer.setSize(viewport.clientWidth, viewport.clientHeight);
-    renderer.shadowMap.enabled = true;
-    renderer.shadowMap.type = THREE.BasicShadowMap; // Faster than PCFSoft
-    canvas.appendChild(renderer.domElement);
-
-    const controls = new OrbitControls(camera, renderer.domElement);
-    controls.enableDamping = true;
-    controls.dampingFactor = 0.15; // Snappier damping
-    controls.minDistance = 4;
-    controls.maxDistance = 18;
-    controls.maxPolarAngle = Math.PI * 0.75;
-    controls.autoRotate = true;
-    controls.autoRotateSpeed = 2.5; // Faster rotation
-
-    // Lighting
-    const ambientLight = new THREE.AmbientLight(0xF5F2ED, 0.5);
-    scene.add(ambientLight);
-
-    const keyLight = new THREE.DirectionalLight(0xFFFFFF, 0.8);
-    keyLight.position.set(5, 8, 5);
-    keyLight.castShadow = true;
-    keyLight.shadow.mapSize.set(1024, 1024); // Lower res for speed
-    scene.add(keyLight);
-
-    const fillLight = new THREE.DirectionalLight(0xE8EFF5, 0.3);
-    fillLight.position.set(-4, 2, -3);
-    scene.add(fillLight);
-
-    // 3D Components Construction
-    const components = new THREE.Group();
-    scene.add(components);
-
-    const materialPalette = {
-        duct: new THREE.MeshStandardMaterial({ color: 0xE8E6E0, roughness: 0.6, metalness: 0.1 }),
-        lining: new THREE.MeshStandardMaterial({ color: 0xF0EDE6, roughness: 0.8 }),
-        pcb: new THREE.MeshStandardMaterial({ color: 0x1A2E1A, roughness: 0.8, metalness: 0.0 }),
-        chip: new THREE.MeshStandardMaterial({ color: 0x1A1A1A, roughness: 0.5 }),
-        screen: new THREE.MeshStandardMaterial({ color: 0x000000, emissive: 0xA8BCCC, emissiveIntensity: 0.3 }),
-        lampOff: new THREE.MeshStandardMaterial({ color: 0x888888 }),
-        lampOn: new THREE.MeshStandardMaterial({ color: 0xFFFFFF, emissive: 0xFFF3CC, emissiveIntensity: 0.8 })
-    };
-
-    // Duct (4 panels)
-    const ductGroup = new THREE.Group();
-    ductGroup.userData = { name: "Intervention Duct", desc: "Main photocatalytic treatment chamber.", originalPos: new THREE.Vector3(0, 0, 0) };
-    const pSize = { w: 8, h: 2, d: 2, t: 0.05 };
-    
-    const panels = [
-        { size: [pSize.w, pSize.t, pSize.d], pos: [0, pSize.h/2, 0] }, // Top
-        { size: [pSize.w, pSize.t, pSize.d], pos: [0, -pSize.h/2, 0] }, // Bottom
-        { size: [pSize.w, pSize.h, pSize.t], pos: [0, 0, pSize.d/2] }, // Front Wall
-        { size: [pSize.w, pSize.h, pSize.t], pos: [0, 0, -pSize.d/2] } // Back Wall
-    ];
-
-    panels.forEach(p => {
-        const mesh = new THREE.Mesh(new THREE.BoxGeometry(...p.size), materialPalette.duct);
-        mesh.position.set(...p.pos);
-        mesh.castShadow = true;
-        mesh.receiveShadow = true;
-        ductGroup.add(mesh);
-        
-        // Inner lining
-        const lining = new THREE.Mesh(new THREE.BoxGeometry(p.size[0], p.size[1]*1.1, p.size[2]*1.1), materialPalette.lining);
-        lining.position.copy(mesh.position);
-        lining.scale.set(0.99, 0.99, 0.99);
-        ductGroup.add(lining);
+    particles.push({
+      el: circle,
+      phase: Math.random(),
+      speed: 0.0015 + Math.random() * 0.003,
+      yOffset: DUCT_Y1 + 14 + Math.random() * (DUCT_Y2 - DUCT_Y1 - 28),
+      yWobble: (Math.random() - 0.5) * 6,
+      wobbleSpeed: 0.02 + Math.random() * 0.03,
+      wobblePhase: Math.random() * Math.PI * 2
     });
-    components.add(ductGroup);
+  }
 
-    // UV Lamp
-    const uvLamp = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 1.9, 8), materialPalette.lampOff); // Lower segments
-    uvLamp.rotation.z = Math.PI / 2;
-    uvLamp.position.set(0, 0.3, 0);
-    uvLamp.userData = { name: "UV-C Lamp", desc: "Triggers the photocatalytic reaction on TiO2 surface.", originalPos: new THREE.Vector3(0, 0.3, 0) };
-    ductGroup.add(uvLamp);
+  function lerpColor(c1, c2, t) {
+    const r1 = parseInt(c1.slice(1,3),16), g1 = parseInt(c1.slice(3,5),16), b1 = parseInt(c1.slice(5,7),16);
+    const r2 = parseInt(c2.slice(1,3),16), g2 = parseInt(c2.slice(3,5),16), b2 = parseInt(c2.slice(5,7),16);
+    const r = Math.round(r1 + (r2-r1)*t);
+    const gv = Math.round(g1 + (g2-g1)*t);
+    const b = Math.round(b1 + (b2-b1)*t);
+    return `rgb(${r},${gv},${b})`;
+  }
 
-    const uvLight = new THREE.PointLight(0xFFF8E7, 0, 4);
-    uvLight.position.copy(uvLamp.position);
-    ductGroup.add(uvLight);
+  const RED = '#C0412A', AMBER = '#B87333', GREEN = '#2A6B47';
 
-    // STM32 Board
-    const stm32 = new THREE.Group();
-    stm32.position.set(0, 0.5, -3);
-    stm32.userData = { name: "STM32 Controller", desc: "Central processing unit for real-time sensor logic.", originalPos: new THREE.Vector3(0, 0.5, -3) };
-    const pcb = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.05, 1), materialPalette.pcb);
-    pcb.castShadow = true;
-    stm32.add(pcb);
-    const chip = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.1, 0.4), materialPalette.chip);
-    chip.position.y = 0.05;
-    stm32.add(chip);
-    components.add(stm32);
+  let tick = 0;
+  function animateParticles() {
+    tick++;
+    const uvOn = state.uvActive;
 
-    // Gas Sensor
-    const gasSensor = new THREE.Group();
-    gasSensor.position.set(-5, -0.5, 1);
-    gasSensor.userData = { name: "MQ-135 Gas Sensor", desc: "Detects NO2 concentration levels in ambient air.", originalPos: new THREE.Vector3(-5, -0.5, 1) };
-    const sensorPcb = new THREE.Mesh(new THREE.BoxGeometry(1, 0.05, 0.8), materialPalette.pcb);
-    gasSensor.add(sensorPcb);
-    [[-0.2, 0.2], [0.2, 0.2]].forEach(p => {
-        const cyl = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.15, 0.3, 8), materialPalette.lampOff);
-        cyl.position.set(p[0], 0.15, p[1]);
-        gasSensor.add(cyl);
-    });
-    components.add(gasSensor);
+    particles.forEach(p => {
+      p.phase += p.speed;
+      if (p.phase > 1) {
+        p.phase -= 1;
+        p.yOffset = DUCT_Y1 + 14 + Math.random() * (DUCT_Y2 - DUCT_Y1 - 28);
+      }
 
-    // BMP180
-    const bmp180 = new THREE.Group();
-    bmp180.position.set(-4.5, 0.5, -1);
-    bmp180.userData = { name: "BMP180 Sensor", desc: "Monitors atmospheric pressure and temperature.", originalPos: new THREE.Vector3(-4.5, 0.5, -1) };
-    const bmpPcb = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.05, 0.6), materialPalette.pcb);
-    bmp180.add(bmpPcb);
-    components.add(bmp180);
+      const x = DUCT_X1 + p.phase * (DUCT_X2 - DUCT_X1);
+      const uvZoneStart = (UV_START - DUCT_X1) / (DUCT_X2 - DUCT_X1);
+      const uvZoneEnd = (UV_END - DUCT_X1) / (DUCT_X2 - DUCT_X1);
 
-    // OLED
-    const oled = new THREE.Group();
-    oled.position.set(3, 0.5, 3);
-    oled.rotation.y = -Math.PI / 4;
-    oled.userData = { name: "OLED Status Display", desc: "Local visualization for direct system monitoring.", originalPos: new THREE.Vector3(3, 0.5, 3) };
-    const oledFrame = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.8, 0.1), materialPalette.chip);
-    const oledScreen = new THREE.Mesh(new THREE.BoxGeometry(1, 0.6, 0.02), materialPalette.screen);
-    oledScreen.position.z = 0.05;
-    oled.add(oledFrame, oledScreen);
-    components.add(oled);
+      let color;
+      if (!uvOn) {
+        color = RED;
+      } else if (p.phase < uvZoneStart) {
+        color = RED;
+      } else if (p.phase < uvZoneEnd) {
+        const t = (p.phase - uvZoneStart) / (uvZoneEnd - uvZoneStart);
+        color = t < 0.5 ? lerpColor(RED, AMBER, t*2) : lerpColor(AMBER, GREEN, (t-0.5)*2);
+      } else {
+        color = GREEN;
+      }
 
-    // Wires
-    const wires = new THREE.Group();
-    scene.add(wires);
-
-    function createWire(start, end, color) {
-        const points = [
-            start,
-            new THREE.Vector3().lerpVectors(start, end, 0.3).add(new THREE.Vector3(0, -0.5, 0)),
-            new THREE.Vector3().lerpVectors(start, end, 0.7).add(new THREE.Vector3(0, -0.5, 0)),
-            end
-        ];
-        const curve = new THREE.CatmullRomCurve3(points);
-        const geo = new THREE.TubeGeometry(curve, 8, 0.02, 4, false); // Massive segment reduction
-        const mat = new THREE.MeshStandardMaterial({ color });
-        return new THREE.Mesh(geo, mat);
-    }
-
-    const wireConfigs = [
-        { start: gasSensor.position, end: stm32.position, color: 0x8B7355 },
-        { start: bmp180.position, end: stm32.position, color: 0x1A3D2B },
-        { start: oled.position, end: stm32.position, color: 0x1A3D2B },
-        { start: new THREE.Vector3(0, 1, 0), end: stm32.position, color: 0xC0412A }
-    ];
-    wireConfigs.forEach(c => wires.add(createWire(c.start, c.end, c.color)));
-
-    // Particles (Instanced)
-    const particleCount = 120;
-    const pGeo = new THREE.BufferGeometry();
-    const pPos = new Float32Array(particleCount * 3);
-    const pPhase = new Float32Array(particleCount);
-    const pColor = new Float32Array(particleCount * 3);
-
-    for(let i=0; i<particleCount; i++) {
-        pPhase[i] = Math.random();
-        pPos[i*3] = (pPhase[i] - 0.5) * 8;
-        pPos[i*3+1] = (Math.random() - 0.5) * 1.5;
-        pPos[i*3+2] = (Math.random() - 0.5) * 1.5;
-    }
-
-    pGeo.setAttribute('position', new THREE.BufferAttribute(pPos, 3));
-    pGeo.setAttribute('phase', new THREE.BufferAttribute(pPhase, 1));
-    pGeo.setAttribute('color', new THREE.BufferAttribute(pColor, 3));
-
-    // Programmatic Sprite Texture
-    const canvasP = document.createElement('canvas');
-    canvasP.width = 32; canvasP.height = 32;
-    const ctxP = canvasP.getContext('2d');
-    const gradP = ctxP.createRadialGradient(16, 16, 0, 16, 16, 16);
-    gradP.addColorStop(0, 'white'); gradP.addColorStop(1, 'transparent');
-    ctxP.fillStyle = gradP; ctxP.fillRect(0, 0, 32, 32);
-    const pTex = new THREE.CanvasTexture(canvasP);
-
-    const pMat = new THREE.PointsMaterial({ size: 0.12, vertexColors: true, map: pTex, transparent: true, depthWrite: false });
-    const pSystem = new THREE.Points(pGeo, pMat);
-    components.add(pSystem);
-
-    // Interaction & Animation
-    const raycaster = new THREE.Raycaster();
-    const mouse = new THREE.Vector2();
-    let hovered = null;
-    const label = document.createElement('div');
-    label.className = 'schematic-label';
-    labelsContainer.appendChild(label);
-
-    window.addEventListener('mousemove', (e) => {
-        const rect = renderer.domElement.getBoundingClientRect();
-        mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
-        mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+      const wobble = Math.sin(tick * p.wobbleSpeed + p.wobblePhase) * p.yWobble;
+      p.el.setAttribute('cx', x.toFixed(1));
+      p.el.setAttribute('cy', (p.yOffset + wobble).toFixed(1));
+      p.el.setAttribute('fill', color);
     });
 
-    const uiToggles = {
-        wiring: document.getElementById('toggle-wiring'),
-        explode: document.getElementById('toggle-explode'),
-        live: document.getElementById('toggle-live')
-    };
-
-    function updateParticles(uvActive) {
-        const pos = pGeo.attributes.position.array;
-        const phases = pGeo.attributes.phase.array;
-        const colors = pGeo.attributes.color.array;
-
-        for(let i=0; i<particleCount; i++) {
-            phases[i] += 0.012 + Math.random() * 0.018; // Even faster (5x original)
-            if(phases[i] > 1.0) {
-                phases[i] = 0;
-                pos[i*3+1] = (Math.random() - 0.5) * 1.5;
-                pos[i*3+2] = (Math.random() - 0.5) * 1.5;
-            }
-            pos[i*3] = (phases[i] - 0.5) * 8;
-
-            // Color Logic
-            let r=0.75, g=0.25, b=0.16; // Default Terracotta
-            if (uvActive && phases[i] > 0.45) {
-                if (phases[i] < 0.6) {
-                    // Amber transition
-                    r = 0.72; g = 0.45; b = 0.2;
-                } else {
-                    // Clean Green
-                    r = 0.16; g = 0.42; b = 0.28;
-                }
-            }
-            colors[i*3] = r; colors[i*3+1] = g; colors[i*3+2] = b;
-        }
-        pGeo.attributes.position.needsUpdate = true;
-        pGeo.attributes.phase.needsUpdate = true;
-        pGeo.attributes.color.needsUpdate = true;
+    // UV glow
+    const uvZone = document.getElementById('uv-zone');
+    const uvLamp = document.getElementById('uv-lamp-bar');
+    if (uvZone && uvLamp) {
+      if (uvOn) {
+        const pulse = 0.08 + Math.sin(tick * 0.04) * 0.04;
+        uvZone.setAttribute('opacity', pulse.toFixed(3));
+        uvLamp.setAttribute('opacity', (0.5 + Math.sin(tick * 0.04) * 0.2).toFixed(3));
+      } else {
+        uvZone.setAttribute('opacity', '0');
+        uvLamp.setAttribute('opacity', '0.15');
+      }
     }
 
-    function animate() {
-        requestAnimationFrame(animate);
-        controls.update();
+    requestAnimationFrame(animateParticles);
+  }
+  animateParticles();
+})();
 
-        // Hover Detection
-        raycaster.setFromCamera(mouse, camera);
-        const intersects = raycaster.intersectObjects(components.children, true);
-        
-        let found = null;
-        if (intersects.length > 0) {
-            let obj = intersects[0].object;
-            while(obj.parent && !obj.userData.name) obj = obj.parent;
-            if(obj.userData.name) found = obj;
-        }
 
-        if (found !== hovered) {
-            if (hovered) hovered.position.y -= 0.15;
-            hovered = found;
-            if (hovered) {
-                hovered.position.y += 0.15;
-                label.innerHTML = `<strong>${hovered.userData.name}</strong><br>${hovered.userData.desc}`;
-                label.classList.add('visible');
-            } else {
-                label.classList.remove('visible');
-            }
-        }
+// ─── 2. LIVE DATA UPDATE ───────────────────────────
+function updateReadings() {
+  state.no2In = simValue(state.no2In, 12, 140, 220);
+  state.no2Out = simValue(state.no2Out, 6, 30, 80);
+  state.temp = simValue(state.temp, 0.5, 22, 38);
+  state.pressure = simValue(state.pressure, 2, 990, 1030);
+  state.uvActive = state.no2In > 140;
 
-        if (hovered) {
-            const vector = new THREE.Vector3();
-            hovered.getWorldPosition(vector);
-            vector.project(camera);
-            label.style.left = `${(vector.x + 1) / 2 * viewport.clientWidth}px`;
-            label.style.top = `${(-vector.y + 1) / 2 * viewport.clientHeight}px`;
-        }
+  // Current readings UI
+  const elNo2In = document.getElementById('val-no2-in');
+  const elNo2Out = document.getElementById('val-no2-out');
+  const elTemp = document.getElementById('val-temp');
+  const elPressure = document.getElementById('val-pressure');
+  const elReduction = document.getElementById('val-reduction');
+  const elStatus = document.getElementById('status-no2');
+  const elUvWord = document.getElementById('uv-word');
+  const elUvIcon = document.getElementById('uv-icon');
 
-        // Explode View (Smooth Snappy Lerp)
-        const explodeFactor = uiToggles.explode.checked ? 1.8 : 0;
-        components.children.forEach(c => {
-            if(c === pSystem || !c.userData.originalPos) return;
-            const targetPos = c.userData.originalPos.clone().add(c.userData.originalPos.clone().normalize().multiplyScalar(explodeFactor));
-            c.position.lerp(targetPos, 0.15); // Fast lerp
-        });
-        
-        // Duct internal parts follow duct
-        uvLamp.position.lerp(uvLamp.userData.originalPos, 0.15);
+  if (elNo2In) elNo2In.textContent = Math.round(state.no2In);
+  if (elNo2Out) elNo2Out.textContent = Math.round(state.no2Out);
+  if (elTemp) elTemp.textContent = state.temp.toFixed(1);
+  if (elPressure) elPressure.textContent = Math.round(state.pressure);
 
-        // Wires Visibility
-        wires.visible = uiToggles.wiring.checked;
+  if (elReduction) {
+    const pct = Math.round((1 - state.no2Out / state.no2In) * 100);
+    elReduction.textContent = `↓ ${pct}% reduction`;
+  }
 
-        // UV System Simulation
-        const uvActive = currentOutgoing < 60;
-        uvLamp.material = uvActive ? materialPalette.lampOn : materialPalette.lampOff;
-        uvLight.intensity = uvActive ? 0.8 : 0;
-        
-        updateParticles(uvActive);
-        
-        renderer.render(scene, camera);
+  if (elStatus) {
+    if (state.no2In > 180) {
+      elStatus.textContent = 'CRITICAL';
+      elStatus.className = 'reading-status critical';
+    } else if (state.no2In > 120) {
+      elStatus.textContent = 'WARNING';
+      elStatus.className = 'reading-status warning';
+    } else {
+      elStatus.textContent = 'SAFE';
+      elStatus.className = 'reading-status safe';
+    }
+  }
+
+  if (elUvWord) {
+    elUvWord.textContent = state.uvActive ? 'active' : 'standby';
+    elUvWord.className = 'fraunces uv-word' + (state.uvActive ? '' : ' standby-text');
+  }
+  if (elUvIcon) {
+    elUvIcon.className = 'uv-lamp-icon ' + (state.uvActive ? 'active' : 'standby');
+  }
+
+  // OLED sim
+  const oled = document.getElementById('oled-val');
+  if (oled) oled.textContent = `NO₂:${Math.round(state.no2In)}`;
+
+  // 3D readout
+  const ro = document.getElementById('three-readout');
+  if (ro) ro.textContent = `IN: ${Math.round(state.no2In)} µg/m³ · OUT: ${Math.round(state.no2Out)} µg/m³ · UV: ${state.uvActive ? 'ON' : 'OFF'}`;
+
+  // History arrays
+  const now = new Date();
+  const label = now.getHours().toString().padStart(2,'0') + ':' + now.getMinutes().toString().padStart(2,'0') + ':' + now.getSeconds().toString().padStart(2,'0');
+
+  [state.histNo2In, state.histNo2Out, state.histTemp, state.histPressure, state.labels].forEach(arr => {
+    if (arr.length >= state.maxPoints) arr.shift();
+  });
+  state.histNo2In.push(Math.round(state.no2In));
+  state.histNo2Out.push(Math.round(state.no2Out));
+  state.histTemp.push(parseFloat(state.temp.toFixed(1)));
+  state.histPressure.push(Math.round(state.pressure));
+  state.labels.push(label);
+
+  updateCharts();
+}
+
+// Seed initial history
+for (let i = 0; i < 20; i++) {
+  state.no2In = simValue(175, 20, 140, 220);
+  state.no2Out = simValue(48, 8, 30, 80);
+  state.temp = simValue(28.4, 0.8, 22, 38);
+  state.pressure = simValue(1013, 3, 990, 1030);
+  const d = new Date(Date.now() - (20-i)*2000);
+  const l = d.getHours().toString().padStart(2,'0') + ':' + d.getMinutes().toString().padStart(2,'0') + ':' + d.getSeconds().toString().padStart(2,'0');
+  state.histNo2In.push(Math.round(state.no2In));
+  state.histNo2Out.push(Math.round(state.no2Out));
+  state.histTemp.push(parseFloat(state.temp.toFixed(1)));
+  state.histPressure.push(Math.round(state.pressure));
+  state.labels.push(l);
+}
+
+setInterval(updateReadings, 2000);
+
+
+// ─── 3. CHART.JS GRAPHS ────────────────────────────
+let chartNo2, chartTemp, chartPressure;
+
+const chartDefaults = {
+  responsive: true,
+  maintainAspectRatio: false,
+  animation: { duration: 400 },
+  plugins: {
+    legend: { display: false },
+    tooltip: {
+      mode: 'index',
+      intersect: false,
+      backgroundColor: '#F7F6F2',
+      titleColor: '#2C2C28',
+      bodyColor: '#6B6962',
+      borderColor: 'rgba(44,44,40,0.15)',
+      borderWidth: 1,
+      padding: 10,
+      titleFont: { family: 'DM Sans', size: 11 },
+      bodyFont: { family: 'DM Sans', size: 11 }
+    }
+  },
+  scales: {
+    x: {
+      grid: { color: 'rgba(44,44,40,0.06)', drawBorder: false },
+      ticks: { font: { family: 'DM Sans', size: 10 }, color: '#A8A69E', maxTicksLimit: 8, maxRotation: 0 },
+      border: { display: false }
+    },
+    y: {
+      grid: { color: 'rgba(44,44,40,0.06)', drawBorder: false },
+      ticks: { font: { family: 'DM Sans', size: 10 }, color: '#A8A69E' },
+      border: { display: false }
+    }
+  }
+};
+
+function makeLineDataset(label, data, color, fill) {
+  return {
+    label,
+    data,
+    borderColor: color,
+    backgroundColor: fill || 'transparent',
+    borderWidth: 1.5,
+    pointRadius: 0,
+    pointHoverRadius: 3,
+    tension: 0.35,
+    fill: !!fill
+  };
+}
+
+function initCharts() {
+  const no2Canvas = document.getElementById('chart-no2');
+  const tempCanvas = document.getElementById('chart-temp');
+  const pressCanvas = document.getElementById('chart-pressure');
+  if (!no2Canvas || !tempCanvas || !pressCanvas) return;
+
+  const whoLine = {
+    id: 'whoLine',
+    beforeDraw(chart) {
+      const { ctx, chartArea: { left, right, top, bottom }, scales: { y } } = chart;
+      if (!y) return;
+      const yVal = y.getPixelForValue(25);
+      if (yVal < top || yVal > bottom) return;
+      ctx.save();
+      ctx.strokeStyle = 'rgba(44,44,40,0.2)';
+      ctx.setLineDash([4,4]);
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(left, yVal);
+      ctx.lineTo(right, yVal);
+      ctx.stroke();
+      ctx.restore();
+    }
+  };
+
+  chartNo2 = new Chart(no2Canvas, {
+    type: 'line',
+    data: {
+      labels: [...state.labels],
+      datasets: [
+        makeLineDataset('Incoming NO₂', [...state.histNo2In], '#C0412A', 'rgba(192,65,42,0.05)'),
+        makeLineDataset('Outgoing NO₂', [...state.histNo2Out], '#2A6B47', 'rgba(42,107,71,0.05)')
+      ]
+    },
+    options: {
+      ...chartDefaults,
+      plugins: { ...chartDefaults.plugins, legend: { display: false } },
+      scales: {
+        ...chartDefaults.scales,
+        y: { ...chartDefaults.scales.y, min: 0, max: 250, title: { display: false } }
+      }
+    },
+    plugins: [whoLine]
+  });
+
+  chartTemp = new Chart(tempCanvas, {
+    type: 'line',
+    data: {
+      labels: [...state.labels],
+      datasets: [makeLineDataset('Temperature', [...state.histTemp], '#8B7355', 'rgba(139,115,85,0.06)')]
+    },
+    options: {
+      ...chartDefaults,
+      scales: {
+        ...chartDefaults.scales,
+        y: { ...chartDefaults.scales.y, min: 15, max: 45 }
+      }
+    }
+  });
+
+  chartPressure = new Chart(pressCanvas, {
+    type: 'line',
+    data: {
+      labels: [...state.labels],
+      datasets: [makeLineDataset('Pressure', [...state.histPressure], '#1A3D2B', 'rgba(26,61,43,0.06)')]
+    },
+    options: {
+      ...chartDefaults,
+      scales: {
+        ...chartDefaults.scales,
+        y: { ...chartDefaults.scales.y, min: 980, max: 1040 }
+      }
+    }
+  });
+}
+
+function updateCharts() {
+  if (!chartNo2) return;
+  chartNo2.data.labels = [...state.labels];
+  chartNo2.data.datasets[0].data = [...state.histNo2In];
+  chartNo2.data.datasets[1].data = [...state.histNo2Out];
+  chartNo2.update('none');
+
+  chartTemp.data.labels = [...state.labels];
+  chartTemp.data.datasets[0].data = [...state.histTemp];
+  chartTemp.update('none');
+
+  chartPressure.data.labels = [...state.labels];
+  chartPressure.data.datasets[0].data = [...state.histPressure];
+  chartPressure.update('none');
+}
+
+// Wait for Chart.js to load
+if (typeof Chart !== 'undefined') {
+  initCharts();
+} else {
+  document.addEventListener('DOMContentLoaded', initCharts);
+}
+
+
+// ─── 4. THREE.JS 3D SCHEMATIC ──────────────────────
+(function init3D() {
+  const canvas = document.getElementById('three-canvas');
+  if (!canvas || typeof THREE === 'undefined') return;
+
+  const W = canvas.parentElement.clientWidth;
+  const H = canvas.parentElement.clientHeight || 520;
+
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+  renderer.setSize(W, H);
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.setClearColor(0xEFEDE7, 1);
+
+  const scene = new THREE.Scene();
+
+  const camera = new THREE.PerspectiveCamera(45, W / H, 0.1, 100);
+  camera.position.set(6, 4, 9);
+  camera.lookAt(0, 0, 0);
+
+  // ─ Lights ─
+  scene.add(new THREE.AmbientLight(0xF5F2ED, 0.5));
+  const dirLight = new THREE.DirectionalLight(0xFFFFFF, 0.9);
+  dirLight.position.set(5, 8, 5);
+  dirLight.castShadow = true;
+  dirLight.shadow.mapSize.width = 1024;
+  dirLight.shadow.mapSize.height = 1024;
+  scene.add(dirLight);
+  const fillLight = new THREE.DirectionalLight(0xE8EFF5, 0.3);
+  fillLight.position.set(-4, 2, -3);
+  scene.add(fillLight);
+
+  const uvPointLight = new THREE.PointLight(0xFFF8E7, 0, 3);
+  uvPointLight.position.set(0, 0.3, 0);
+  scene.add(uvPointLight);
+
+  // ─ Materials ─
+  const matDuct = new THREE.MeshStandardMaterial({ color: 0xE8E6E0, roughness: 0.6, metalness: 0.05 });
+  const matInner = new THREE.MeshStandardMaterial({ color: 0xF5F2EC, roughness: 0.8, metalness: 0 });
+  const matPCB = new THREE.MeshStandardMaterial({ color: 0x1A2E1A, roughness: 0.8, metalness: 0 });
+  const matChip = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.9, metalness: 0 });
+  const matOLED = new THREE.MeshStandardMaterial({ color: 0x0A1F0A, roughness: 0.5, metalness: 0, emissive: 0x0A4A1A, emissiveIntensity: 0.3 });
+  const matWireRed = new THREE.MeshStandardMaterial({ color: 0xC0412A, roughness: 0.8, metalness: 0 });
+  const matWireGreen = new THREE.MeshStandardMaterial({ color: 0x1A3D2B, roughness: 0.8, metalness: 0 });
+  const matWireBrown = new THREE.MeshStandardMaterial({ color: 0x8B7355, roughness: 0.8, metalness: 0 });
+  const matUV = new THREE.MeshStandardMaterial({ color: 0xE8C04A, roughness: 0.4, metalness: 0.1, emissive: 0xE8C04A, emissiveIntensity: 0 });
+
+  // ─ Component registry for raycasting ─
+  const interactable = [];
+  const wireGroup = new THREE.Group();
+  scene.add(wireGroup);
+
+  function addMesh(geo, mat, pos, rot, label, desc, parent) {
+    const m = new THREE.Mesh(geo, mat);
+    m.position.set(...pos);
+    if (rot) m.rotation.set(...rot);
+    m.castShadow = true;
+    m.receiveShadow = true;
+    (parent || scene).add(m);
+    if (label) interactable.push({ mesh: m, name: label, desc });
+    return m;
+  }
+
+  // ─ Duct (4 panels — open ends) ─
+  const ductLen = 7, ductH = 1.2, ductD = 1.2, wallT = 0.08;
+  // Top
+  addMesh(new THREE.BoxGeometry(ductLen, wallT, ductD), matDuct, [0, ductH/2, 0]);
+  // Bottom
+  addMesh(new THREE.BoxGeometry(ductLen, wallT, ductD), matDuct, [0, -ductH/2, 0]);
+  // Front wall
+  addMesh(new THREE.BoxGeometry(ductLen, ductH, wallT), matDuct, [0, 0, ductD/2]);
+  // Back wall
+  addMesh(new THREE.BoxGeometry(ductLen, ductH, wallT), matDuct, [0, 0, -ductD/2]);
+  // TiO2 inner lining (front inner)
+  addMesh(new THREE.BoxGeometry(ductLen, ductH-0.01, 0.02), matInner, [0, 0, ductD/2-wallT-0.01], null, 'TiO₂ coating', 'Photocatalytic titanium dioxide surface — converts NO₂ to nitrates under UV');
+
+  // ─ UV Lamp ─
+  const uvLampMesh = addMesh(new THREE.CylinderGeometry(0.04, 0.04, ductD-0.05, 12), matUV, [0, 0.25, 0], [Math.PI/2, 0, 0], 'UV Lamp', '365nm UV light source — activates TiO₂ photocatalytic reaction');
+
+  // ─ Gas Sensor PCB ─
+  const sensorPCB = addMesh(new THREE.BoxGeometry(0.9, 0.06, 0.7), matPCB, [-2.5, -1.2, 0], null, 'Gas Sensor (MQ)', 'Reads analog NO₂ concentration · output fed to STM32 ADC');
+  addMesh(new THREE.CylinderGeometry(0.07, 0.07, 0.18, 8), matChip, [-2.3, -1.1, 0.1], null, null, null, scene);
+  addMesh(new THREE.CylinderGeometry(0.07, 0.07, 0.18, 8), matChip, [-2.7, -1.1, -0.1], null, null, null, scene);
+
+  // ─ BMP180 ─
+  addMesh(new THREE.BoxGeometry(0.5, 0.04, 0.4), matPCB, [-1.5, -1.2, 0], null, 'BMP180 Sensor', 'Measures temperature & atmospheric pressure via I2C');
+  addMesh(new THREE.BoxGeometry(0.14, 0.06, 0.14), matChip, [-1.5, -1.16, 0], null, null, null, scene);
+
+  // ─ STM32 Board ─
+  addMesh(new THREE.BoxGeometry(1.4, 0.06, 1.0), matPCB, [0, -1.2, 0], null, 'STM32 MCU', 'Brain of the system — ADC, I2C, UART · processes sensor data and controls UV relay');
+  addMesh(new THREE.BoxGeometry(0.4, 0.1, 0.4), matChip, [0, -1.14, 0], null, null, null, scene);
+  // smaller components
+  for (let i = 0; i < 4; i++) {
+    addMesh(new THREE.BoxGeometry(0.1, 0.06, 0.08), matChip, [-0.45 + i*0.25, -1.14, 0.3], null, null, null, scene);
+  }
+
+  // ─ OLED Display (upright) ─
+  addMesh(new THREE.BoxGeometry(0.9, 0.6, 0.04), new THREE.MeshStandardMaterial({color:0x111111,roughness:0.5}), [2.5, -0.5, ductD/2+0.1], null, 'OLED Display', 'Shows live NO₂, temperature, pressure & system status locally');
+  const oledScreen = addMesh(new THREE.BoxGeometry(0.78, 0.46, 0.01), matOLED, [2.5, -0.5, ductD/2+0.12], null, null, null, scene);
+
+  // ─ Wires using CatmullRom curves ─
+  function makeTube(points, mat, r) {
+    const curve = new THREE.CatmullRomCurve3(points.map(p => new THREE.Vector3(...p)));
+    const geo = new THREE.TubeGeometry(curve, 12, r || 0.025, 6, false);
+    const m = new THREE.Mesh(geo, mat);
+    wireGroup.add(m);
+    return m;
+  }
+  // Sensor → STM32
+  makeTube([[-2.5, -1.17, 0], [-1.5, -1.3, 0.2], [0, -1.17, 0.4]], matWireBrown);
+  // BMP180 → STM32
+  makeTube([[-1.5, -1.17, 0], [-0.7, -1.3, 0.2], [0, -1.17, 0.3]], matWireGreen);
+  // STM32 → UV lamp
+  makeTube([[0, -1.17, 0], [0, -0.5, 0.3], [0, 0.2, 0]], matWireGreen);
+  // STM32 → OLED
+  makeTube([[0.7, -1.17, 0], [1.8, -1.0, 0.4], [2.5, -0.8, 0.6]], matWireRed);
+  // Power wire
+  makeTube([[-3.2, -1.5, 0], [-2.5, -1.26, 0]], matWireRed);
+
+  // ─ Ground plane ─
+  const groundMesh = addMesh(new THREE.BoxGeometry(12, 0.04, 8), new THREE.MeshStandardMaterial({color: 0xE0DDD6, roughness:1}), [0, -1.8, 0]);
+  groundMesh.receiveShadow = true;
+
+  // ─ Particles (3D) ─
+  const PART_COUNT = 80;
+  const partPositions = new Float32Array(PART_COUNT * 3);
+  const partColors = new Float32Array(PART_COUNT * 3);
+  const partPhases = new Float32Array(PART_COUNT);
+  const partSpeeds = new Float32Array(PART_COUNT);
+  const partY = new Float32Array(PART_COUNT);
+  const partZ = new Float32Array(PART_COUNT);
+
+  for (let i = 0; i < PART_COUNT; i++) {
+    partPhases[i] = Math.random();
+    partSpeeds[i] = 0.003 + Math.random() * 0.004;
+    partY[i] = (Math.random() - 0.5) * (ductH - 0.3);
+    partZ[i] = (Math.random() - 0.5) * (ductD - 0.3);
+  }
+
+  const partGeo = new THREE.BufferGeometry();
+  partGeo.setAttribute('position', new THREE.BufferAttribute(partPositions, 3));
+  partGeo.setAttribute('color', new THREE.BufferAttribute(partColors, 3));
+
+  const partMat = new THREE.PointsMaterial({ size: 0.07, vertexColors: true, sizeAttenuation: true });
+  const points = new THREE.Points(partGeo, partMat);
+  scene.add(points);
+
+  const colRed = new THREE.Color('#C0412A');
+  const colAmber = new THREE.Color('#B87333');
+  const colGreen = new THREE.Color('#2A6B47');
+  const tmpColor = new THREE.Color();
+
+  function updateParticles3D() {
+    const uvOn = state.uvActive;
+    for (let i = 0; i < PART_COUNT; i++) {
+      partPhases[i] += partSpeeds[i];
+      if (partPhases[i] > 1) {
+        partPhases[i] -= 1;
+        partY[i] = (Math.random() - 0.5) * (ductH - 0.3);
+        partZ[i] = (Math.random() - 0.5) * (ductD - 0.3);
+      }
+      const ph = partPhases[i];
+      const x = -ductLen/2 + ph * ductLen;
+      partPositions[i*3] = x;
+      partPositions[i*3+1] = partY[i];
+      partPositions[i*3+2] = partZ[i];
+
+      const uvS = 0.3, uvE = 0.7;
+      if (!uvOn) {
+        tmpColor.copy(colRed);
+      } else if (ph < uvS) {
+        tmpColor.copy(colRed);
+      } else if (ph < uvE) {
+        const t = (ph - uvS) / (uvE - uvS);
+        if (t < 0.5) tmpColor.lerpColors(colRed, colAmber, t*2);
+        else tmpColor.lerpColors(colAmber, colGreen, (t-0.5)*2);
+      } else {
+        tmpColor.copy(colGreen);
+      }
+      partColors[i*3] = tmpColor.r;
+      partColors[i*3+1] = tmpColor.g;
+      partColors[i*3+2] = tmpColor.b;
+    }
+    partGeo.attributes.position.needsUpdate = true;
+    partGeo.attributes.color.needsUpdate = true;
+  }
+
+  // ─ Explode positions ─
+  const basePositions = {};
+  interactable.forEach((item, idx) => {
+    basePositions[idx] = item.mesh.position.clone();
+  });
+
+  // ─ Simple orbit controls (manual) ─
+  let isDown = false, lastX = 0, lastY = 0;
+  let rotX = 0.4, rotY = 0.5;
+  let autoRotate = true;
+  let autoTimer = null;
+
+  canvas.addEventListener('mousedown', e => {
+    isDown = true; lastX = e.clientX; lastY = e.clientY;
+    autoRotate = false;
+    clearTimeout(autoTimer);
+  });
+  canvas.addEventListener('mouseup', () => {
+    isDown = false;
+    autoTimer = setTimeout(() => autoRotate = true, 3000);
+  });
+  canvas.addEventListener('mousemove', e => {
+    if (!isDown) return;
+    const dx = e.clientX - lastX, dy = e.clientY - lastY;
+    rotY += dx * 0.005;
+    rotX += dy * 0.005;
+    rotX = Math.max(-Math.PI*0.4, Math.min(Math.PI*0.4, rotX));
+    lastX = e.clientX; lastY = e.clientY;
+    handleHover(e);
+  });
+  canvas.addEventListener('wheel', e => {
+    camera.position.multiplyScalar(1 + e.deltaY * 0.001);
+    const d = camera.position.length();
+    camera.position.setLength(Math.max(4, Math.min(18, d)));
+  }, { passive: true });
+
+  // Touch
+  let lastTX = 0, lastTY = 0;
+  canvas.addEventListener('touchstart', e => {
+    lastTX = e.touches[0].clientX; lastTY = e.touches[0].clientY;
+    autoRotate = false; clearTimeout(autoTimer);
+  });
+  canvas.addEventListener('touchmove', e => {
+    const dx = e.touches[0].clientX - lastTX, dy = e.touches[0].clientY - lastTY;
+    rotY += dx * 0.005; rotX += dy * 0.005;
+    rotX = Math.max(-Math.PI*0.4, Math.min(Math.PI*0.4, rotX));
+    lastTX = e.touches[0].clientX; lastTY = e.touches[0].clientY;
+  });
+  canvas.addEventListener('touchend', () => {
+    autoTimer = setTimeout(() => autoRotate = true, 3000);
+  });
+
+  // ─ Raycasting ─
+  const raycaster = new THREE.Raycaster();
+  const mouse = new THREE.Vector2();
+  const labelEl = document.getElementById('component-label');
+  const labelName = document.getElementById('label-name');
+  const labelDesc = document.getElementById('label-desc');
+
+  function handleHover(e) {
+    if (!labelEl) return;
+    const rect = canvas.getBoundingClientRect();
+    mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+    mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+    raycaster.setFromCamera(mouse, camera);
+    const meshes = interactable.map(i => i.mesh);
+    const hits = raycaster.intersectObjects(meshes);
+    if (hits.length > 0) {
+      const found = interactable.find(i => i.mesh === hits[0].object);
+      if (found) {
+        labelName.textContent = found.name;
+        labelDesc.textContent = found.desc;
+        labelEl.classList.remove('hidden');
+        labelEl.style.left = (e.clientX - canvas.getBoundingClientRect().left + 12) + 'px';
+        labelEl.style.top = (e.clientY - canvas.getBoundingClientRect().top - 20) + 'px';
+        canvas.style.cursor = 'pointer';
+        return;
+      }
+    }
+    labelEl.classList.add('hidden');
+    canvas.style.cursor = 'grab';
+  }
+  canvas.addEventListener('mousemove', handleHover);
+
+  // ─ Checkboxes ─
+  const chkWire = document.getElementById('chk-wiring');
+  const chkExplode = document.getElementById('chk-explode');
+  const chkLive = document.getElementById('chk-live');
+
+  if (chkWire) chkWire.addEventListener('change', () => { wireGroup.visible = chkWire.checked; });
+
+  let explodeT = 0, explodeTarget = 0;
+  if (chkExplode) chkExplode.addEventListener('change', () => { explodeTarget = chkExplode.checked ? 1 : 0; });
+
+  // ─ Pivot for orbit ─
+  const pivot = new THREE.Group();
+  // Move all scene children into pivot
+  scene.add(pivot);
+
+  // ─ Animate loop ─
+  let tick3d = 0;
+  function animate() {
+    requestAnimationFrame(animate);
+    tick3d++;
+
+    if (autoRotate) rotY += 0.003;
+
+    pivot.rotation.x = rotX;
+    pivot.rotation.y = rotY;
+
+    // UV effects
+    const uvOn = state.uvActive;
+    matUV.emissiveIntensity = uvOn ? (0.6 + Math.sin(tick3d * 0.05) * 0.2) : 0;
+    uvPointLight.intensity = uvOn ? (0.5 + Math.sin(tick3d * 0.05) * 0.2) : 0;
+
+    // OLED pulse on data update
+    if (tick3d % 60 === 0) {
+      matOLED.emissiveIntensity = 0.8;
+    } else {
+      matOLED.emissiveIntensity = Math.max(0.3, matOLED.emissiveIntensity - 0.02);
     }
 
-    animate();
-
-    // Data Integration
-    const no2Readout = document.getElementById('current-no2-readout');
-    const uiIn = document.getElementById('ui-in-val');
-    const uiOut = document.getElementById('ui-out-val');
-    const uvStatusEl = document.getElementById('uv-status');
-
-    function updateLiveReadouts(incoming, outgoing, temp, pressure) {
-        currentIncoming = incoming;
-        currentOutgoing = outgoing;
-        currentTemp = temp;
-        currentPressure = pressure;
-
-        no2Readout.innerText = incoming.toFixed(2);
-        uiIn.innerText = incoming.toFixed(0);
-        uiOut.innerText = outgoing.toFixed(0);
-
-        if (outgoing < 60) {
-            uvStatusEl.innerText = 'active';
-            uvStatusEl.classList.add('active');
-            materialPalette.screen.emissiveIntensity = 0.8;
-            setTimeout(() => materialPalette.screen.emissiveIntensity = 0.3, 400);
-        } else {
-            uvStatusEl.innerText = 'standby';
-            uvStatusEl.classList.remove('active');
-        }
-    }
-
-    setInterval(() => {
-        if (!uiToggles.live.checked) return;
-        const incoming = 160 + Math.random() * 40;
-        const outgoing = 38 + Math.random() * 17;
-        const temp = 23 + Math.random() * 3;
-        const pressure = 1010 + Math.random() * 5;
-        updateLiveReadouts(incoming, outgoing, temp, pressure);
-    }, 1000);
-
-    window.addEventListener('resize', () => {
-        camera.aspect = viewport.clientWidth / viewport.clientHeight;
-        camera.updateProjectionMatrix();
-        renderer.setSize(viewport.clientWidth, viewport.clientHeight);
+    // Explode
+    explodeT += (explodeTarget - explodeT) * 0.06;
+    interactable.forEach((item, idx) => {
+      const base = basePositions[idx];
+      if (!base) return;
+      const dir = base.clone().normalize();
+      item.mesh.position.lerpVectors(base, base.clone().add(dir.multiplyScalar(1.5)), explodeT);
     });
 
-});
+    updateParticles3D();
+    renderer.render(scene, camera);
+  }
+
+  // Move all existing children into pivot
+  const toMove = [];
+  scene.children.forEach(c => { if (c !== pivot) toMove.push(c); });
+  toMove.forEach(c => { scene.remove(c); pivot.add(c); });
+
+  // Reposition camera
+  camera.position.set(6, 4, 9);
+  camera.lookAt(pivot.position);
+
+  animate();
+
+  // Resize
+  window.addEventListener('resize', () => {
+    const W2 = canvas.parentElement.clientWidth;
+    const H2 = canvas.parentElement.clientHeight || 520;
+    renderer.setSize(W2, H2);
+    camera.aspect = W2 / H2;
+    camera.updateProjectionMatrix();
+  });
+})();

@@ -1,191 +1,338 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>APIG — Air Pollution Intervention Grid</title>
-    <meta name="description" content="A real-time photocatalytic intervention system for urban NO2 pollution.">
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,100..1000;1,9..40,100..1000&family=Fraunces:ital,opsz,wght@0,9..144,100..900;1,9..144,100..900&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>APIG — Air Pollution Intervention Grid</title>
+<meta name="description" content="A real-time photocatalytic intervention system for urban NO₂ pollution.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;1,9..40,400&family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,400;1,9..144,300&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <main>
-        <!-- Section 1: Hero -->
-        <section id="hero" class="viewport-height">
-            <div class="container hero-grid">
-                <div class="hero-text">
-                    <h1 class="fraunces">Air comes in.<br>Less of it leaves.</h1>
-                    <p class="dm-sans subtitle">A real-time photocatalytic intervention system for urban NO₂ pollution.</p>
-                </div>
-                <div class="hero-visual">
-                    <!-- SVG Chamber will be here -->
-                    <svg id="chamber-svg" viewBox="0 0 600 300" preserveAspectRatio="xMidYMid meet">
-                        <!-- Technical Cutaway -->
-                        <rect x="50" y="100" width="500" height="100" fill="none" stroke="#2C2C28" stroke-width="2" />
-                        <rect x="50" y="100" width="500" height="100" fill="url(#tio2-pattern)" />
-                        
-                        <!-- UV Lamp Zone -->
-                        <rect id="uv-lamp" x="250" y="110" width="100" height="10" fill="#FFB700" opacity="0.3" rx="2" />
-                        <rect class="uv-active-zone" x="200" y="102" width="200" height="96" fill="#FFB700" opacity="0.05" />
-                        
-                        <!-- Patterns -->
-                        <defs>
-                            <pattern id="tio2-pattern" x="0" y="0" width="10" height="10" patternUnits="userSpaceOnUse">
-                                <path d="M-1,1 l2,-2 M0,10 l10,-10 M9,11 l2,-2" stroke="#2C2C28" stroke-width="0.5" opacity="0.1" />
-                            </pattern>
-                        </defs>
 
-                        <!-- Particles Group -->
-                        <g id="particles-in"></g>
-                        <g id="particles-out"></g>
-                    </svg>
-                </div>
-            </div>
-        </section>
+<main>
 
-        <!-- Section 2: The Two Numbers -->
-        <section id="comparison" class="full-width bg-linen">
-            <div class="container comparison-grid">
-                <div class="comparison-side incoming">
-                    <span class="label dm-sans-caps">INCOMING NO₂</span>
-                    <div class="value-row">
-                        <span id="incoming-value" class="fraunces display-large">182</span>
-                        <span class="unit dm-sans">µg/m³</span>
-                    </div>
-                </div>
-                <div class="divider"></div>
-                <div class="comparison-side outgoing">
-                    <span class="label dm-sans-caps">OUTGOING NO₂</span>
-                    <div class="value-row">
-                        <span id="outgoing-value" class="fraunces display-large accent-green-text">47</span>
-                        <span class="unit dm-sans">µg/m³</span>
-                    </div>
-                </div>
-            </div>
-            <div class="reduction-bar-container">
-                <div id="reduction-bar-base" class="reduction-bar terracotta-bg"></div>
-                <div id="reduction-bar-active" class="reduction-bar clean-green-bg"></div>
-            </div>
-            <div class="reduction-percentage fraunces">
-                <span id="reduction-counter">0</span>% reduction
-            </div>
-        </section>
+  <!-- ═══ SECTION 1: HERO ═══ -->
+  <section id="hero">
+    <div class="hero-inner">
+      <div class="hero-text">
+        <p class="eyebrow">Node 01 · Mumbai · Live</p>
+        <h1 class="fraunces">Air comes in.<br><em>Less of it leaves.</em></h1>
+        <p class="subtitle">A real-time photocatalytic intervention system<br>for urban NO₂ pollution. STM32 · TiO₂ · UV.</p>
+      </div>
 
-        <!-- Section 3: The Process -->
-        <section id="process">
-            <div class="container">
-                <div class="process-track">
-                    <div class="process-rule"></div>
-                    <div class="process-stages">
-                        <div class="stage" data-index="01">
-                            <span class="stage-number">01</span>
-                            <h3 class="dm-sans">Polluted air enters</h3>
-                            <p class="dm-sans">Atmospheric intake captures urban air concentrated with nitrogen dioxide.</p>
-                        </div>
-                        <div class="stage" data-index="02">
-                            <span class="stage-number">02</span>
-                            <h3 class="dm-sans">Sensors detect</h3>
-                            <p class="dm-sans">High-precision gas sensors monitor NO₂, temperature, and flow velocity.</p>
-                        </div>
-                        <div class="stage" data-index="03">
-                            <span class="stage-number">03</span>
-                            <h3 class="dm-sans">STM32 decides</h3>
-                            <p class="dm-sans">Real-time processing calculates optimal UV intensity and residence time.</p>
-                        </div>
-                        <div class="stage" data-index="04">
-                            <span class="stage-number">04</span>
-                            <h3 class="dm-sans">UV activates</h3>
-                            <p class="dm-sans">Photocatalytic TiO₂ coating triggers molecular degradation of pollutants.</p>
-                        </div>
-                        <div class="stage" data-index="05">
-                            <span class="stage-number">05</span>
-                            <h3 class="dm-sans">Cleaner air exits</h3>
-                            <p class="dm-sans">Processed air is released back into the urban environment with significantly lower NO₂.</p>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </section>
+      <!-- SVG SCHEMATIC (hero visual) -->
+      <div class="hero-schematic">
+        <svg id="chamber-svg" viewBox="0 0 700 260" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Animated cross-section of the air treatment chamber">
+          <defs>
+            <pattern id="tio2" x="0" y="0" width="12" height="12" patternUnits="userSpaceOnUse">
+              <line x1="0" y1="12" x2="12" y2="0" stroke="#1A3D2B" stroke-width="0.6" opacity="0.18"/>
+            </pattern>
+            <clipPath id="duct-clip">
+              <rect x="80" y="80" width="540" height="100"/>
+            </clipPath>
+          </defs>
 
-        <!-- Section 4: Live Data -->
-        <section id="live-data">
-            <div class="container live-grid">
-                <div class="live-column main-readout">
-                    <span class="label dm-sans-caps">CURRENT NO₂ LEVEL</span>
-                    <div id="current-no2-readout" class="dm-mono display-med">182.00</div>
-                    <div class="barcode-container">
-                        <div id="barcode-chart"></div>
-                    </div>
-                </div>
-                <div class="live-column sub-readouts">
-                    <div class="chamber-specs-container">
-                        <span class="label dm-sans-caps">SYSTEM SCHEMATIC — INTERACTIVE 3D</span>
-                        <div id="schematic-viewport" class="schematic-container">
-                            <div id="schematic-canvas"></div>
-                            
-                            <!-- 3D Component Labels (Dynamic) -->
-                            <div id="schematic-labels"></div>
-                            
-                            <!-- UI Controls Overlay -->
-                            <div class="schematic-ui">
-                                <div class="ui-toggles">
-                                    <label class="toggle-item"><input type="checkbox" id="toggle-wiring" checked> <span>Show wiring</span></label>
-                                    <label class="toggle-item"><input type="checkbox" id="toggle-explode"> <span>Explode view</span></label>
-                                    <label class="toggle-item"><input type="checkbox" id="toggle-live" checked> <span>Live data</span></label>
-                                </div>
-                                <div class="ui-readout dm-mono">
-                                    IN: <span id="ui-in-val">182</span> µg/m³ · OUT: <span id="ui-out-val">47</span> µg/m³
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="data-pair uv-status-pair">
-                        <span class="label dm-sans-caps">UV SYSTEM STATUS</span>
-                        <div id="uv-status" class="fraunces status-text">active</div>
-                    </div>
-                </div>
-            </div>
-        </section>
+          <!-- Duct walls -->
+          <rect x="80" y="80" width="540" height="100" fill="#F0EDE6" rx="3"/>
+          <rect x="80" y="80" width="540" height="100" fill="url(#tio2)" rx="3"/>
+          <!-- Top wall -->
+          <rect x="80" y="80" width="540" height="8" fill="#E0DDD6" rx="2"/>
+          <!-- Bottom wall -->
+          <rect x="80" y="172" width="540" height="8" fill="#E0DDD6" rx="2"/>
+          <!-- Duct outline -->
+          <rect x="80" y="80" width="540" height="100" fill="none" stroke="#2C2C28" stroke-width="1.5" rx="3"/>
 
-        <!-- Section 5: Editorial -->
-        <section id="how-it-works" class="editorial">
-            <div class="container editorial-grid">
-                <div class="editorial-column">
-                    <h2 class="dm-sans">The Mechanics of Photocatalysis</h2>
-                    <p>The intervention grid utilizes a heterogeneous photocatalytic process. When ultraviolet (UV) light illuminates the Titanium Dioxide (TiO₂) coating, it generates electron-hole pairs. These highly reactive species interact with water vapor and oxygen in the air to produce hydroxyl radicals (•OH) and superoxide anions (O₂⁻).</p>
-                    <p>These powerful oxidants react with Nitrogen Dioxide (NO₂) molecules, converting them into non-toxic nitrates (NO₃⁻) which are adsorbed onto the surface of the grid, effectively removing the pollutant from the air stream.</p>
-                </div>
-                <div class="editorial-column">
-                    <div class="molecular-svg-container">
-                        <svg id="molecular-svg" viewBox="0 0 300 200">
-                            <!-- NO2 to Nitrate Schematic -->
-                            <circle cx="50" cy="100" r="10" fill="#C0412A" />
-                            <text x="45" y="105" fill="white" font-size="8" class="dm-sans">NO₂</text>
-                            
-                            <path d="M80 100 H150" stroke="#2C2C28" stroke-width="1" marker-end="url(#arrowhead)" />
-                            
-                            <rect x="180" y="80" width="80" height="40" fill="none" stroke="#2A6B47" stroke-width="1" />
-                            <text x="195" y="105" fill="#2A6B47" font-size="8" class="dm-sans">NO₃⁻ (Nitrates)</text>
-                            
-                            <defs>
-                                <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="0" refY="3.5" orient="auto">
-                                    <polygon points="0 0, 10 3.5, 0 7" fill="#2C2C28" />
-                                </marker>
-                            </defs>
-                        </svg>
-                    </div>
-                    <p>The STM32 microcontroller acts as the nervous system of the grid. By continuously monitoring environmental parameters, it dynamically adjusts the UV intensity to maintain optimal reaction rates while minimizing energy consumption. This closed-loop control ensures that the grid remains effective across varying urban conditions, from high-traffic peak hours to stagnant evening air.</p>
-                </div>
-            </div>
-        </section>
-    </main>
+          <!-- UV Lamp -->
+          <rect id="uv-lamp-bar" x="295" y="89" width="110" height="7" fill="#E8C04A" rx="2" opacity="0.6"/>
+          <!-- UV zone glow area -->
+          <rect id="uv-zone" x="265" y="88" width="170" height="84" fill="#FFF8D6" opacity="0" rx="2"/>
 
-    <footer class="container dm-sans footer-note">
-        <p>© 2026 Air Pollution Intervention Grid Research Group. APIG-01 Prototype.</p>
-    </footer>
+          <!-- UV label -->
+          <text x="350" y="75" text-anchor="middle" font-family="DM Sans" font-size="9" fill="#8B7355" letter-spacing="0.05em">UV LAMP</text>
+          <line x1="350" y1="78" x2="350" y2="87" stroke="#8B7355" stroke-width="0.8"/>
 
-    <script type="module" src="script.js"></script>
+          <!-- TiO2 label -->
+          <text x="630" y="108" text-anchor="start" font-family="DM Sans" font-size="9" fill="#8B7355" letter-spacing="0.05em">TiO₂</text>
+          <line x1="620" y1="106" x2="625" y2="106" stroke="#8B7355" stroke-width="0.8"/>
+
+          <!-- Intake label -->
+          <text x="40" y="136" text-anchor="middle" font-family="DM Sans" font-size="9" fill="#C0412A" letter-spacing="0.05em">INTAKE</text>
+          <line x1="70" y1="130" x2="82" y2="130" stroke="#C0412A" stroke-width="0.8" marker-end="url(#arr-r)"/>
+
+          <!-- Exhaust label -->
+          <text x="660" y="136" text-anchor="middle" font-family="DM Sans" font-size="9" fill="#2A6B47" letter-spacing="0.05em">EXHAUST</text>
+          <line x1="620" y1="130" x2="632" y2="130" stroke="#2A6B47" stroke-width="0.8"/>
+
+          <defs>
+            <marker id="arr-r" markerWidth="6" markerHeight="6" refX="3" refY="3" orient="auto">
+              <path d="M1 1 L5 3 L1 5" fill="none" stroke="#C0412A" stroke-width="1"/>
+            </marker>
+          </defs>
+
+          <!-- Sensor box below duct -->
+          <rect x="110" y="192" width="60" height="28" fill="#F7F6F2" stroke="#2C2C28" stroke-width="1" rx="2"/>
+          <text x="140" y="207" text-anchor="middle" font-family="DM Sans" font-size="8" fill="#2C2C28">GAS</text>
+          <text x="140" y="216" text-anchor="middle" font-family="DM Sans" font-size="8" fill="#2C2C28">SENSOR</text>
+          <line x1="140" y1="188" x2="140" y2="192" stroke="#8B7355" stroke-width="1" stroke-dasharray="2,2"/>
+
+          <!-- STM32 box -->
+          <rect x="310" y="192" width="80" height="28" fill="#1A2E1A" rx="2"/>
+          <text x="350" y="207" text-anchor="middle" font-family="DM Sans" font-size="8" fill="#A8D8B0">STM32</text>
+          <text x="350" y="216" text-anchor="middle" font-family="DM Sans" font-size="7" fill="#6BAA7A">MCU · ADC · I2C</text>
+          <line x1="350" y1="188" x2="350" y2="192" stroke="#1A3D2B" stroke-width="1" stroke-dasharray="2,2"/>
+
+          <!-- OLED box -->
+          <rect x="535" y="192" width="60" height="28" fill="#111" rx="2"/>
+          <rect x="539" y="195" width="52" height="21" fill="#0A1F0A" rx="1"/>
+          <text x="565" y="209" text-anchor="middle" font-family="DM Sans" font-size="7" fill="#4AE87A" id="oled-val">NO₂:182</text>
+          <text x="565" y="215" text-anchor="middle" font-family="DM Sans" font-size="6" fill="#2A6B47">OLED</text>
+
+          <!-- Wire: sensor → STM32 -->
+          <path d="M170 206 Q240 206 310 206" fill="none" stroke="#8B7355" stroke-width="1" stroke-dasharray="3,2"/>
+          <!-- Wire: STM32 → UV lamp -->
+          <path d="M350 192 Q350 180 350 160" fill="none" stroke="#1A3D2B" stroke-width="1" stroke-dasharray="3,2"/>
+          <!-- Wire: STM32 → OLED -->
+          <path d="M390 206 Q462 206 535 206" fill="none" stroke="#C0412A" stroke-width="1" stroke-dasharray="3,2"/>
+
+          <!-- BMP180 tiny sensor -->
+          <rect x="190" y="195" width="38" height="22" fill="#F7F6F2" stroke="#2C2C28" stroke-width="0.8" rx="2"/>
+          <text x="209" y="207" text-anchor="middle" font-family="DM Sans" font-size="7" fill="#2C2C28">BMP180</text>
+          <text x="209" y="214" text-anchor="middle" font-family="DM Sans" font-size="6" fill="#8B7355">T · P</text>
+
+          <!-- Particles rendered by JS -->
+          <g id="particles" clip-path="url(#duct-clip)"></g>
+        </svg>
+
+        <div class="schematic-legend">
+          <span class="leg-dot" style="background:#C0412A"></span><span>High NO₂</span>
+          <span class="leg-dot" style="background:#B87333"></span><span>In treatment</span>
+          <span class="leg-dot" style="background:#2A6B47"></span><span>Reduced NO₂</span>
+          <span class="leg-uv"></span><span>UV active</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ SECTION 2: LIVE READINGS ═══ -->
+  <section id="live-readings">
+    <div class="readings-header">
+      <span class="section-label">Live readings</span>
+      <span class="live-dot-wrap"><span class="live-dot"></span> Live</span>
+    </div>
+
+    <div class="readings-grid">
+      <div class="reading-block main-reading" id="block-no2">
+        <span class="reading-label">Incoming NO₂</span>
+        <div class="reading-value-row">
+          <span class="reading-number fraunces" id="val-no2-in">182</span>
+          <span class="reading-unit">µg/m³</span>
+        </div>
+        <div class="reading-status" id="status-no2">CRITICAL</div>
+      </div>
+
+      <div class="reading-block" id="block-no2-out">
+        <span class="reading-label">Outgoing NO₂</span>
+        <div class="reading-value-row">
+          <span class="reading-number fraunces green" id="val-no2-out">47</span>
+          <span class="reading-unit">µg/m³</span>
+        </div>
+        <div class="reading-reduction" id="val-reduction">↓ 74% reduction</div>
+      </div>
+
+      <div class="reading-block" id="block-temp">
+        <span class="reading-label">Temperature</span>
+        <div class="reading-value-row">
+          <span class="reading-number fraunces" id="val-temp">28.4</span>
+          <span class="reading-unit">°C</span>
+        </div>
+        <div class="reading-sub" id="sub-temp">ambient</div>
+      </div>
+
+      <div class="reading-block" id="block-pressure">
+        <span class="reading-label">Pressure</span>
+        <div class="reading-value-row">
+          <span class="reading-number fraunces" id="val-pressure">1013</span>
+          <span class="reading-unit">hPa</span>
+        </div>
+        <div class="reading-sub">sea level</div>
+      </div>
+
+      <div class="reading-block uv-block" id="block-uv">
+        <span class="reading-label">UV System</span>
+        <div class="uv-status-display">
+          <span class="uv-lamp-icon" id="uv-icon"></span>
+          <span class="fraunces uv-word" id="uv-word">active</span>
+        </div>
+        <div class="reading-sub">365 nm · TiO₂ reaction</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ SECTION 3: TIME-SERIES GRAPHS ═══ -->
+  <section id="graphs">
+    <div class="graphs-header">
+      <span class="section-label">Sensor history</span>
+      <span class="graph-note">Last 60 data points · updates every 2s</span>
+    </div>
+
+    <div class="graphs-grid">
+
+      <div class="graph-panel wide">
+        <div class="graph-title-row">
+          <span class="graph-title">NO₂ concentration</span>
+          <div class="graph-legend-row">
+            <span class="gl-item"><span class="gl-line" style="background:#C0412A"></span>Incoming</span>
+            <span class="gl-item"><span class="gl-line" style="background:#2A6B47"></span>Outgoing</span>
+            <span class="gl-item"><span class="gl-dash"></span>WHO limit 25 µg/m³</span>
+          </div>
+        </div>
+        <div class="graph-wrap">
+          <canvas id="chart-no2" aria-label="NO2 time series chart"></canvas>
+        </div>
+      </div>
+
+      <div class="graph-panel">
+        <div class="graph-title-row">
+          <span class="graph-title">Temperature</span>
+          <span class="graph-unit-badge">°C</span>
+        </div>
+        <div class="graph-wrap">
+          <canvas id="chart-temp" aria-label="Temperature time series chart"></canvas>
+        </div>
+      </div>
+
+      <div class="graph-panel">
+        <div class="graph-title-row">
+          <span class="graph-title">Pressure</span>
+          <span class="graph-unit-badge">hPa</span>
+        </div>
+        <div class="graph-wrap">
+          <canvas id="chart-pressure" aria-label="Pressure time series chart"></canvas>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ═══ SECTION 4: 3D SCHEMATIC ═══ -->
+  <section id="schematic-3d">
+    <div class="schematic-header">
+      <span class="section-label">3D system schematic</span>
+      <span class="graph-note">Drag to rotate · scroll to zoom · hover to inspect</span>
+    </div>
+    <div class="schematic-outer">
+      <canvas id="three-canvas"></canvas>
+      <div id="component-label" class="component-label hidden">
+        <strong id="label-name"></strong>
+        <span id="label-desc"></span>
+      </div>
+      <div class="three-controls">
+        <label><input type="checkbox" id="chk-wiring" checked> Wiring</label>
+        <label><input type="checkbox" id="chk-explode"> Explode</label>
+        <label><input type="checkbox" id="chk-live" checked> Live data</label>
+      </div>
+      <div class="three-readout" id="three-readout">IN: 182 µg/m³ · OUT: 47 µg/m³ · UV: ON</div>
+    </div>
+  </section>
+
+  <!-- ═══ SECTION 5: PROCESS STEPS ═══ -->
+  <section id="process">
+    <div class="process-inner">
+      <span class="section-label">How it works</span>
+      <div class="process-stages">
+        <div class="process-stage">
+          <span class="stage-num">01</span>
+          <h3>Polluted air enters</h3>
+          <p>Urban air concentrated with nitrogen dioxide is drawn through the intake. The BMP180 logs ambient temperature and pressure to compensate sensor readings.</p>
+        </div>
+        <div class="process-connector"></div>
+        <div class="process-stage">
+          <span class="stage-num">02</span>
+          <h3>Sensors detect</h3>
+          <p>The MQ-series gas sensor reads analog NO₂ concentration. The STM32 ADC samples it continuously, smoothing with a rolling average to filter noise.</p>
+        </div>
+        <div class="process-connector"></div>
+        <div class="process-stage">
+          <span class="stage-num">03</span>
+          <h3>STM32 decides</h3>
+          <p>Threshold logic in the embedded firmware evaluates the NO₂ level. If it exceeds the safe limit, the UV control signal is asserted via a GPIO pin.</p>
+        </div>
+        <div class="process-connector"></div>
+        <div class="process-stage">
+          <span class="stage-num">04</span>
+          <h3>UV activates · TiO₂ reacts</h3>
+          <p>365 nm UV light strikes the titanium dioxide coating. Electron-hole pairs form, generating hydroxyl radicals that oxidize NO₂ into harmless nitrates.</p>
+        </div>
+        <div class="process-connector"></div>
+        <div class="process-stage">
+          <span class="stage-num">05</span>
+          <h3>Cleaner air exits</h3>
+          <p>The treated air exits with significantly reduced NO₂. A second sensor reading at the exhaust quantifies the reduction and feeds the dashboard in real time.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ SECTION 6: EDITORIAL ═══ -->
+  <section id="editorial">
+    <div class="editorial-inner">
+      <div class="editorial-col">
+        <h2 class="fraunces">The chemistry<br><em>behind the reduction</em></h2>
+        <p>When ultraviolet light at 365 nm strikes the TiO₂ surface, it excites electrons into the conduction band, leaving behind positively charged holes. These electron-hole pairs react with ambient water vapour and oxygen to produce hydroxyl radicals (•OH) — one of the most powerful oxidising agents in chemistry.</p>
+        <p>These radicals attack NO₂ molecules in the airstream, breaking the nitrogen-oxygen bonds and converting the pollutant into nitrate ions (NO₃⁻) that adsorb onto the coating surface. The net result: air with a measurably lower concentration of a compound that causes lung damage, smog, and ozone formation.</p>
+      </div>
+      <div class="editorial-col">
+        <div class="molecule-diagram">
+          <svg viewBox="0 0 320 180" role="img" aria-label="NO2 to nitrate conversion diagram">
+            <defs>
+              <marker id="marr" markerWidth="7" markerHeight="7" refX="3.5" refY="3.5" orient="auto">
+                <path d="M1 1L6 3.5L1 6" fill="none" stroke="#2C2C28" stroke-width="1.2"/>
+              </marker>
+            </defs>
+            <!-- NO2 molecule -->
+            <circle cx="52" cy="90" r="20" fill="#C0412A" opacity="0.15" stroke="#C0412A" stroke-width="1.2"/>
+            <text x="52" y="87" text-anchor="middle" font-family="DM Sans" font-size="11" fill="#C0412A" font-weight="500">NO₂</text>
+            <text x="52" y="100" text-anchor="middle" font-family="DM Sans" font-size="8" fill="#C0412A">nitrogen</text>
+            <text x="52" y="109" text-anchor="middle" font-family="DM Sans" font-size="8" fill="#C0412A">dioxide</text>
+
+            <!-- UV + TiO2 -->
+            <rect x="110" y="72" width="100" height="36" fill="#FFF8D6" stroke="#E8C04A" stroke-width="1" rx="4"/>
+            <text x="160" y="87" text-anchor="middle" font-family="DM Sans" font-size="9" fill="#8B7355">UV + TiO₂</text>
+            <text x="160" y="99" text-anchor="middle" font-family="DM Sans" font-size="8" fill="#8B7355">•OH radicals</text>
+
+            <!-- Arrows -->
+            <line x1="74" y1="90" x2="108" y2="90" stroke="#2C2C28" stroke-width="1" marker-end="url(#marr)"/>
+            <line x1="212" y1="90" x2="246" y2="90" stroke="#2C2C28" stroke-width="1" marker-end="url(#marr)"/>
+
+            <!-- NO3 output -->
+            <circle cx="268" cy="90" r="20" fill="#2A6B47" opacity="0.15" stroke="#2A6B47" stroke-width="1.2"/>
+            <text x="268" y="87" text-anchor="middle" font-family="DM Sans" font-size="11" fill="#2A6B47" font-weight="500">NO₃⁻</text>
+            <text x="268" y="100" text-anchor="middle" font-family="DM Sans" font-size="8" fill="#2A6B47">nitrate</text>
+            <text x="268" y="109" text-anchor="middle" font-family="DM Sans" font-size="8" fill="#2A6B47">harmless</text>
+
+            <!-- Bottom note -->
+            <text x="160" y="148" text-anchor="middle" font-family="DM Sans" font-size="8" fill="#8B7355">adsorbed onto TiO₂ surface · removed from airstream</text>
+          </svg>
+        </div>
+        <p>The STM32 microcontroller acts as the system's nervous system — reading sensor data via ADC and I2C, applying calibration, making threshold decisions, driving the UV relay, and streaming processed values to the OLED display and this dashboard simultaneously over UART.</p>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  <span>APIG-01 Prototype · Node 01 · Mumbai</span>
+  <span>© 2026 Air Pollution Intervention Grid Research</span>
+</footer>
+
+<!-- Chart.js -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<!-- Three.js -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="script.js"></script>
 </body>
 </html>
