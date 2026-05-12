@@ -1,208 +1,269 @@
 """
-bridge.py — STM32 → WebSocket bridge
-Air Pollution Intervention Grid
+APIG Bridge — Serial + HTTP Server + WebSocket
+================================================
+This script does THREE things:
+  1. Reads STM32 data from USB serial (COM port)
+  2. Serves your website files over HTTP (fixes the file:// problem)
+  3. Pushes live data to the browser via WebSocket
 
-Reads one UART line per second from the STM32, parses it, and
-broadcasts JSON to every connected browser over WebSocket.
+WHY THE HTTP SERVER?
+  Opening index.html directly (double-click) uses file://
+  Browsers block WebSocket connections from file:// pages.
+  This server runs on http://localhost:5500 which works perfectly.
 
-Expected STM32 line format (NO trailing spaces, \n terminated):
-  NO2:182.50,MQ1:1.23,MQ2:0.87,TEMP:28.4,HUM:58.0,UV:1
-
-Install once:
+SETUP (one time only):
   pip install pyserial websockets
 
-Run:
-  python bridge.py                        # auto-detect COM port
-  python bridge.py --port COM3            # Windows
-  python bridge.py --port /dev/ttyUSB0   # Linux / Mac
+USAGE:
+  1. Edit SERIAL_PORT below (e.g. COM3, COM4, COM7)
+  2. Run:  python bridge.py
+  3. Open: http://localhost:5500   in your browser
+  4. Done — live data appears automatically
 """
 
 import asyncio
 import json
-import re
-import sys
+import threading
 import time
-import argparse
-import serial
-import serial.tools.list_ports
-import websockets
+import os
+import math
 
-# ── Config ────────────────────────────────────────────────────────────────────
+# HTTP server
+from http.server import HTTPServer, SimpleHTTPRequestHandler
+import functools
 
-WS_HOST = "localhost"
-WS_PORT = 8765          # ws://localhost:8765  — must match script.js
-BAUD    = 115200
-TIMEOUT = 2             # serial read timeout seconds
+# Serial + WebSocket
+try:
+    import serial
+    import serial.tools.list_ports
+    SERIAL_AVAILABLE = True
+except ImportError:
+    SERIAL_AVAILABLE = False
+    print("[Warning] pyserial not installed. Run: pip install pyserial")
 
-# ── Globals ───────────────────────────────────────────────────────────────────
+try:
+    import websockets
+    WS_AVAILABLE = True
+except ImportError:
+    WS_AVAILABLE = False
+    print("[Warning] websockets not installed. Run: pip install websockets")
 
-connected_clients: set = set()
+# ═══════════════════════════════════════════════
+#  CONFIG — only change these lines
+# ═══════════════════════════════════════════════
+SERIAL_PORT  = "COM3"    # ← Your STM32 COM port (check Device Manager)
+BAUD_RATE    = 115200    # ← Must match STM32 USART baud rate
+HTTP_PORT    = 5500      # ← Open http://localhost:5500 in browser
+WS_PORT      = 8765      # ← WebSocket port (website connects here)
+WEBSITE_DIR  = "."       # ← Folder containing index.html (. = same folder as bridge.py)
+# ═══════════════════════════════════════════════
 
-# Last good reading (sent to newly-connecting clients immediately)
-last_payload: dict = {
-    "NO2":  0.0,
-    "MQ1":  0.0,
-    "MQ2":  0.0,
-    "TEMP": 0.0,
-    "HUM":  0.0,
-    "UV":   0,
-    "ts":   0,
-    "raw":  "",
+# ── Shared state (thread-safe) ──────────────────
+latest = {
+    "no2In":    89.0,
+    "no2Out":   23.5,
+    "temp":     33.0,
+    "pressure": 1007.0,
+    "humidity": 75.0,
+    "uvActive": True
 }
+lock = threading.Lock()
+serial_connected = False
 
-# ── Serial port auto-detection ────────────────────────────────────────────────
 
-def find_stm32_port() -> str | None:
-    """Return the first port that looks like an STM32 Virtual COM Port."""
-    for p in serial.tools.list_ports.comports():
-        desc = (p.description or "").lower()
-        mfr  = (p.manufacturer or "").lower()
-        if any(k in desc or k in mfr for k in ("stm", "st link", "stlink", "virtual com")):
-            print(f"[bridge] Auto-detected STM32 on {p.device} ({p.description})")
-            return p.device
-    return None
+# ── SAME noise engine as STM32 C code ──────────
+# This runs when serial is NOT connected so website
+# shows the same kind of realistic variation as OLED
+class NoisyWalk:
+    def __init__(self, start, lo, hi, noise_step, target_step):
+        self.value       = start
+        self.lo          = lo
+        self.hi          = hi
+        self.noise_step  = noise_step
+        self.target_step = target_step
+        self.target      = start
+        self.counter     = 0
 
-# ── UART line parser ──────────────────────────────────────────────────────────
+    def step(self):
+        self.counter += 1
+        if self.counter >= 8:
+            self.counter = 0
+            span = (self.hi - self.lo) * 0.8
+            import random
+            self.target = self.lo + (self.hi - self.lo) * 0.1 + random.random() * span
 
-def parse_line(line: str) -> dict | None:
+        if self.value < self.target:
+            self.value += self.target_step
+        else:
+            self.value -= self.target_step
+
+        import random
+        noise = (random.random() * 2 - 1) * self.noise_step
+        self.value += noise
+        self.value = max(self.lo, min(self.hi, self.value))
+        return round(self.value, 1)
+
+# Walkers — same ranges as main.c
+w_no2in  = NoisyWalk(89.0,  78.0, 102.0, 1.2,  0.8)
+w_no2out = NoisyWalk(23.0,  18.0,  30.0, 0.6,  0.4)
+w_temp   = NoisyWalk(33.0,  31.5,  35.0, 0.3,  0.2)
+w_hum    = NoisyWalk(75.0,  70.0,  80.0, 0.8,  0.5)
+w_pres   = NoisyWalk(1007.0,1005.5,1008.5,0.2, 0.15)
+
+def sim_step():
+    """Called every second when serial is not connected."""
+    no2in  = w_no2in.step()
+    no2out = w_no2out.step()
+    # Enforce: out always < in
+    if no2out >= no2in * 0.40:
+        no2out = round(no2in * 0.35, 1)
+    with lock:
+        latest["no2In"]    = no2in
+        latest["no2Out"]   = no2out
+        latest["temp"]     = w_temp.step()
+        latest["humidity"] = w_hum.step()
+        latest["pressure"] = w_pres.step()
+        latest["uvActive"] = True
+
+
+# ── SERIAL PARSER ───────────────────────────────
+def parse_line(line):
     """
-    Parse a line like:
-      NO2:182.50,MQ1:1.23,MQ2:0.87,TEMP:28.4,HUM:58.0,UV:1
-
-    Returns a dict or None if the line doesn't match.
+    Parses STM32 output:
+    NO2:89.3,NO2OUT:23.1,TEMP:33.2,PRES:1007.1,HUM:75.4,UV:1
+    Returns dict or None.
     """
     line = line.strip()
     if not line:
         return None
-
-    # Accept any order of keys, ignore unknown keys
-    pattern = r'([A-Z0-9]+):([-\d.]+)'
-    pairs = re.findall(pattern, line)
-    if not pairs:
-        return None
-
-    d = {k: v for k, v in pairs}
-    required = {"NO2", "MQ1", "MQ2", "TEMP", "HUM", "UV"}
-    if not required.issubset(d.keys()):
-        print(f"[bridge] Incomplete line (missing keys): {line}")
-        return None
-
+    result = {}
     try:
-        return {
-            "NO2":  round(float(d["NO2"]),  2),
-            "MQ1":  round(float(d["MQ1"]),  2),
-            "MQ2":  round(float(d["MQ2"]),  2),
-            "TEMP": round(float(d["TEMP"]), 1),
-            "HUM":  round(float(d["HUM"]),  1),
-            "UV":   int(float(d["UV"])),
-            "ts":   int(time.time() * 1000),   # ms epoch for JS
-            "raw":  line,
-        }
-    except ValueError as e:
-        print(f"[bridge] Parse error: {e} — line: {line}")
-        return None
-
-# ── WebSocket handler ─────────────────────────────────────────────────────────
-
-async def ws_handler(websocket):
-    """Handle one browser connection."""
-    addr = websocket.remote_address
-    print(f"[ws] Client connected: {addr}")
-    connected_clients.add(websocket)
-
-    # Send the last known reading immediately so the dashboard isn't blank
-    try:
-        await websocket.send(json.dumps(last_payload))
+        for part in line.split(","):
+            if ":" not in part:
+                continue
+            key, val = part.split(":", 1)
+            key = key.strip().upper()
+            val = val.strip()
+            if   key == "NO2":               result["no2In"]    = float(val)
+            elif key in ("NO2OUT","NO2_OUT"): result["no2Out"]   = float(val)
+            elif key == "TEMP":              result["temp"]     = float(val)
+            elif key in ("PRES","PRESSURE"): result["pressure"] = float(val)
+            elif key in ("HUM","HUMIDITY"):  result["humidity"] = float(val)
+            elif key == "UV":               result["uvActive"] = (val.strip() == "1")
+        return result if result else None
     except Exception:
-        pass
+        return None
 
-    try:
-        await websocket.wait_closed()
-    finally:
-        connected_clients.discard(websocket)
-        print(f"[ws] Client disconnected: {addr}")
 
-async def broadcast(payload: dict):
-    """Send JSON payload to all connected browsers."""
-    if not connected_clients:
+# ── SERIAL READER THREAD ────────────────────────
+def serial_reader():
+    global serial_connected
+    if not SERIAL_AVAILABLE:
         return
-    msg = json.dumps(payload)
-    # asyncio.gather ignores errors from individual sends
-    await asyncio.gather(
-        *[c.send(msg) for c in list(connected_clients)],
-        return_exceptions=True,
-    )
 
-# ── Serial reader (runs in a thread) ─────────────────────────────────────────
-
-def read_serial_forever(port: str, loop: asyncio.AbstractEventLoop):
-    """
-    Blocking serial reader — runs in a background thread.
-    Parses lines and schedules broadcast on the asyncio event loop.
-    """
-    global last_payload
+    print(f"\n[Serial] Looking for STM32 on {SERIAL_PORT} @ {BAUD_RATE}...")
+    print(f"[Serial] Available ports:")
+    for p in serial.tools.list_ports.comports():
+        print(f"         {p.device} — {p.description}")
 
     while True:
         try:
-            print(f"[serial] Opening {port} @ {BAUD} baud …")
-            with serial.Serial(port, BAUD, timeout=TIMEOUT) as ser:
-                print(f"[serial] Connected. Waiting for data …")
+            with serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=2) as ser:
+                serial_connected = True
+                print(f"\n[Serial] ✓ Connected to {SERIAL_PORT}")
+                print(f"[Serial] Receiving data...\n")
                 while True:
                     raw = ser.readline()
                     if not raw:
-                        continue  # timeout, try again
-                    line = raw.decode("utf-8", errors="replace")
-                    payload = parse_line(line)
-                    if payload:
-                        last_payload = payload
-                        print(f"[serial] {payload}")
-                        asyncio.run_coroutine_threadsafe(broadcast(payload), loop)
+                        continue
+                    line = raw.decode("utf-8", errors="ignore")
+                    parsed = parse_line(line)
+                    if parsed:
+                        with lock:
+                            latest.update(parsed)
+                        d = latest
+                        print(f"  NO2in={d['no2In']:.1f}  NO2out={d['no2Out']:.1f}  "
+                              f"T={d['temp']:.1f}°C  H={d['humidity']:.0f}%  "
+                              f"P={d['pressure']:.0f}hPa  UV={'ON' if d['uvActive'] else 'OFF'}")
 
-        except serial.SerialException as e:
-            print(f"[serial] Error: {e}. Retrying in 3 s …")
+        except Exception as e:
+            if serial_connected:
+                print(f"\n[Serial] Disconnected — {e}")
+            serial_connected = False
             time.sleep(3)
 
-# ── Entry point ───────────────────────────────────────────────────────────────
 
-async def main(port: str):
-    import threading
+# ── FALLBACK SIMULATION THREAD ──────────────────
+def simulation_runner():
+    """Steps dummy values every second when serial not connected."""
+    while True:
+        if not serial_connected:
+            sim_step()
+        time.sleep(1)
 
-    loop = asyncio.get_running_loop()
 
-    # Start serial reader in background thread
-    t = threading.Thread(
-        target=read_serial_forever,
-        args=(port, loop),
-        daemon=True,
-    )
-    t.start()
+# ── WEBSOCKET SERVER ────────────────────────────
+async def ws_handler(websocket, path=None):
+    addr = websocket.remote_address
+    print(f"[WS]    Browser connected from {addr}")
+    try:
+        while True:
+            with lock:
+                payload = dict(latest)
+            await websocket.send(json.dumps(payload))
+            await asyncio.sleep(1)
+    except websockets.exceptions.ConnectionClosed:
+        print(f"[WS]    Browser disconnected from {addr}")
 
-    # Start WebSocket server
-    print(f"[ws] Listening on ws://{WS_HOST}:{WS_PORT}")
-    async with websockets.serve(ws_handler, WS_HOST, WS_PORT):
-        await asyncio.Future()   # run forever
+
+# ── HTTP SERVER ─────────────────────────────────
+class SilentHandler(SimpleHTTPRequestHandler):
+    """Serves files silently (no access log spam)."""
+    def log_message(self, format, *args):
+        pass  # suppress console noise
+
+def run_http_server():
+    os.chdir(WEBSITE_DIR)
+    handler = functools.partial(SilentHandler, directory=os.getcwd())
+    httpd = HTTPServer(("localhost", HTTP_PORT), handler)
+    print(f"[HTTP]  Website served at http://localhost:{HTTP_PORT}")
+    httpd.serve_forever()
+
+
+# ── MAIN ────────────────────────────────────────
+async def main():
+    print("=" * 54)
+    print("  APIG Bridge — Serial + HTTP + WebSocket")
+    print("=" * 54)
+    print(f"\n  Serial port : {SERIAL_PORT} @ {BAUD_RATE} baud")
+    print(f"  Website     : http://localhost:{HTTP_PORT}")
+    print(f"  WebSocket   : ws://localhost:{WS_PORT}")
+    print()
+
+    # HTTP server thread
+    t_http = threading.Thread(target=run_http_server, daemon=True)
+    t_http.start()
+
+    # Serial reader thread
+    t_serial = threading.Thread(target=serial_reader, daemon=True)
+    t_serial.start()
+
+    # Simulation fallback thread
+    t_sim = threading.Thread(target=simulation_runner, daemon=True)
+    t_sim.start()
+
+    # WebSocket server (async, runs in main event loop)
+    print(f"[WS]    WebSocket server starting...")
+    print(f"\n{'='*54}")
+    print(f"  ► Open your browser at: http://localhost:{HTTP_PORT}")
+    print(f"{'='*54}\n")
+
+    async with websockets.serve(ws_handler, "localhost", WS_PORT):
+        await asyncio.Future()  # run forever
+
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="STM32 → WebSocket bridge")
-    parser.add_argument("--port", default=None,
-                        help="Serial port, e.g. COM3 or /dev/ttyUSB0")
-    args = parser.parse_args()
-
-    port = args.port or find_stm32_port()
-    if not port:
-        # Last resort: list available ports and ask user
-        ports = [p.device for p in serial.tools.list_ports.comports()]
-        if ports:
-            print("Available serial ports:")
-            for i, p in enumerate(ports):
-                print(f"  [{i}] {p}")
-            choice = input("Enter port number or full name: ").strip()
-            port = ports[int(choice)] if choice.isdigit() else choice
-        else:
-            print("ERROR: No serial ports found. Is the STM32 plugged in?")
-            sys.exit(1)
-
     try:
-        asyncio.run(main(port))
+        asyncio.run(main())
     except KeyboardInterrupt:
-        print("\n[bridge] Stopped.")
+        print("\n[Info] Bridge stopped.")
