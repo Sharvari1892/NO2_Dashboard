@@ -13,6 +13,8 @@
 <body>
 
 <main>
+  <div id="alert-banner" class="alert-banner" style="display:none"></div>
+
 
   <!-- ═══ SECTION 1: HERO ═══ -->
   <section id="hero">
@@ -119,52 +121,67 @@
   <!-- ═══ SECTION 2: LIVE READINGS ═══ -->
   <section id="live-readings">
     <div class="readings-header">
-      <span class="section-label">Live readings</span>
-      <span class="live-dot-wrap"><span class="live-dot"></span> Live</span>
+      <div class="readings-header-left">
+        <span class="section-label">Live readings</span>
+        <span id="last-updated" class="last-updated"></span>
+      </div>
+      <div class="connection-status">
+        <span id="ws-dot" class="ws-dot"></span>
+        <span id="ws-status">Connecting…</span>
+      </div>
     </div>
 
     <div class="readings-grid">
       <div class="reading-block main-reading" id="block-no2">
-        <span class="reading-label">Incoming NO₂</span>
+        <span class="reading-label">Nitrogen Dioxide</span>
         <div class="reading-value-row">
-          <span class="reading-number fraunces" id="val-no2-in">182</span>
-          <span class="reading-unit">µg/m³</span>
+          <span class="reading-number fraunces" id="val-no2">--</span>
+          <span class="reading-unit">ppm</span>
         </div>
-        <div class="reading-status" id="status-no2">CRITICAL</div>
+        <div class="reading-status" id="status-no2">STANDBY</div>
       </div>
 
-      <div class="reading-block" id="block-no2-out">
-        <span class="reading-label">Outgoing NO₂</span>
+      <div class="reading-block" id="block-mq1">
+        <span class="reading-label">MQ1 Sensor</span>
         <div class="reading-value-row">
-          <span class="reading-number fraunces green" id="val-no2-out">47</span>
-          <span class="reading-unit">µg/m³</span>
+          <span class="reading-number fraunces" id="val-mq1">--</span>
+          <span class="reading-unit">ppm</span>
         </div>
-        <div class="reading-reduction" id="val-reduction">↓ 74% reduction</div>
+        <div class="reading-sub">hydrocarbons</div>
+      </div>
+
+      <div class="reading-block" id="block-mq2">
+        <span class="reading-label">MQ2 Sensor</span>
+        <div class="reading-value-row">
+          <span class="reading-number fraunces" id="val-mq2">--</span>
+          <span class="reading-unit">ppm</span>
+        </div>
+        <div class="reading-sub">combustible gas</div>
       </div>
 
       <div class="reading-block" id="block-temp">
         <span class="reading-label">Temperature</span>
         <div class="reading-value-row">
-          <span class="reading-number fraunces" id="val-temp">28.4</span>
+          <span class="reading-number fraunces" id="val-temp">--</span>
           <span class="reading-unit">°C</span>
         </div>
-        <div class="reading-sub" id="sub-temp">ambient</div>
+        <div class="reading-sub" id="sub-temp">chamber</div>
       </div>
 
-      <div class="reading-block" id="block-pressure">
-        <span class="reading-label">Pressure</span>
+      <div class="reading-block" id="block-hum">
+        <span class="reading-label">Humidity</span>
         <div class="reading-value-row">
-          <span class="reading-number fraunces" id="val-pressure">1013</span>
-          <span class="reading-unit">hPa</span>
+          <span class="reading-number fraunces" id="val-hum">--</span>
+          <span class="reading-unit">%</span>
         </div>
-        <div class="reading-sub">sea level</div>
+        <div class="reading-sub">relative</div>
       </div>
 
       <div class="reading-block uv-block" id="block-uv">
         <span class="reading-label">UV System</span>
         <div class="uv-status-display">
           <span class="uv-lamp-icon" id="uv-icon"></span>
-          <span class="fraunces uv-word" id="uv-word">active</span>
+          <span class="fraunces uv-word" id="uv-status">OFF</span>
         </div>
         <div class="reading-sub">365 nm · TiO₂ reaction</div>
       </div>
@@ -293,10 +310,10 @@
               </marker>
             </defs>
             <!-- NO2 molecule -->
-            <circle cx="52" cy="90" r="20" fill="#C0412A" opacity="0.15" stroke="#C0412A" stroke-width="1.2"/>
-            <text x="52" y="87" text-anchor="middle" font-family="DM Sans" font-size="11" fill="#C0412A" font-weight="500">NO₂</text>
-            <text x="52" y="100" text-anchor="middle" font-family="DM Sans" font-size="8" fill="#C0412A">nitrogen</text>
-            <text x="52" y="109" text-anchor="middle" font-family="DM Sans" font-size="8" fill="#C0412A">dioxide</text>
+            <circle cx="52" cy="90" r="32" fill="#C0412A" opacity="0.15" stroke="#C0412A" stroke-width="1.2"/>
+            <text x="52" y="85" text-anchor="middle" font-family="DM Sans" font-size="12" fill="#C0412A" font-weight="500">NO₂</text>
+            <text x="52" y="100" text-anchor="middle" font-family="DM Sans" font-size="9" fill="#C0412A">nitrogen</text>
+            <text x="52" y="111" text-anchor="middle" font-family="DM Sans" font-size="9" fill="#C0412A">dioxide</text>
 
             <!-- UV + TiO2 -->
             <rect x="110" y="72" width="100" height="36" fill="#FFF8D6" stroke="#E8C04A" stroke-width="1" rx="4"/>
@@ -304,14 +321,14 @@
             <text x="160" y="99" text-anchor="middle" font-family="DM Sans" font-size="8" fill="#8B7355">•OH radicals</text>
 
             <!-- Arrows -->
-            <line x1="74" y1="90" x2="108" y2="90" stroke="#2C2C28" stroke-width="1" marker-end="url(#marr)"/>
-            <line x1="212" y1="90" x2="246" y2="90" stroke="#2C2C28" stroke-width="1" marker-end="url(#marr)"/>
+            <line x1="86" y1="90" x2="106" y2="90" stroke="#2C2C28" stroke-width="1" marker-end="url(#marr)"/>
+            <line x1="214" y1="90" x2="234" y2="90" stroke="#2C2C28" stroke-width="1" marker-end="url(#marr)"/>
 
             <!-- NO3 output -->
-            <circle cx="268" cy="90" r="20" fill="#2A6B47" opacity="0.15" stroke="#2A6B47" stroke-width="1.2"/>
-            <text x="268" y="87" text-anchor="middle" font-family="DM Sans" font-size="11" fill="#2A6B47" font-weight="500">NO₃⁻</text>
-            <text x="268" y="100" text-anchor="middle" font-family="DM Sans" font-size="8" fill="#2A6B47">nitrate</text>
-            <text x="268" y="109" text-anchor="middle" font-family="DM Sans" font-size="8" fill="#2A6B47">harmless</text>
+            <circle cx="268" cy="90" r="32" fill="#2A6B47" opacity="0.15" stroke="#2A6B47" stroke-width="1.2"/>
+            <text x="268" y="85" text-anchor="middle" font-family="DM Sans" font-size="12" fill="#2A6B47" font-weight="500">NO₃⁻</text>
+            <text x="268" y="100" text-anchor="middle" font-family="DM Sans" font-size="9" fill="#2A6B47">nitrate</text>
+            <text x="268" y="111" text-anchor="middle" font-family="DM Sans" font-size="9" fill="#2A6B47">harmless</text>
 
             <!-- Bottom note -->
             <text x="160" y="148" text-anchor="middle" font-family="DM Sans" font-size="8" fill="#8B7355">adsorbed onto TiO₂ surface · removed from airstream</text>

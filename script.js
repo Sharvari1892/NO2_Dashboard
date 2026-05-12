@@ -6,25 +6,225 @@
 //  4. Three.js 3D Schematic
 // ═══════════════════════════════════════════════════
 
-// ─── Live data state ───────────────────────────────
-const state = {
-  no2In: 182,
-  no2Out: 47,
-  temp: 28.4,
-  pressure: 1013,
-  uvActive: true,
-  histNo2In: [],
-  histNo2Out: [],
-  histTemp: [],
-  histPressure: [],
-  labels: [],
-  maxPoints: 60
+/* =============================================================================
+   script.js — WebSocket live-data section
+   Paste this block at the TOP of your existing script.js, before any other code.
+   Replace the section where you currently mock or fetch sensor data.
+   ============================================================================= */
+
+/* ── WebSocket connection to bridge.py ───────────────────────────────────── */
+
+const WS_URL = "ws://localhost:8765";
+
+let ws        = null;
+let wsRetryMs = 2000;   // start with 2 s retry, backs off to 30 s max
+
+function connectWS() {
+    ws = new WebSocket(WS_URL);
+
+    ws.addEventListener("open", () => {
+        console.log("[ws] Connected to bridge");
+        wsRetryMs = 2000;                       // reset backoff on success
+        setConnectionStatus(true);
+    });
+
+    ws.addEventListener("message", (event) => {
+        try {
+            const data = JSON.parse(event.data);
+            handleSensorData(data);
+        } catch (e) {
+            console.warn("[ws] Bad JSON:", event.data);
+        }
+    });
+
+    ws.addEventListener("close", () => {
+        console.warn(`[ws] Disconnected. Retrying in ${wsRetryMs / 1000}s …`);
+        setConnectionStatus(false);
+        setTimeout(connectWS, wsRetryMs);
+        wsRetryMs = Math.min(wsRetryMs * 1.5, 30000);   // exponential backoff
+    });
+
+    ws.addEventListener("error", (err) => {
+        console.error("[ws] Error:", err);
+        ws.close();
+    });
+}
+
+/* ── Data handler — wire this to your dashboard update functions ──────────── */
+
+/**
+ * Called every time a new reading arrives from the STM32.
+ *
+ * @param {Object} data
+ * @param {number}  data.NO2   - NO2 ppm  (float)
+ * @param {number}  data.MQ1   - MQ1 ppm  (float)
+ * @param {number}  data.MQ2   - MQ2 ppm  (float)
+ * @param {number}  data.TEMP  - Temperature °C (float)
+ * @param {number}  data.HUM   - Humidity % (float)
+ * @param {number}  data.UV    - UV relay state: 1 = ON, 0 = OFF (int)
+ * @param {number}  data.ts    - Epoch ms timestamp from bridge
+ * @param {string}  data.raw   - Raw UART line (for debugging)
+ */
+function handleSensorData(data) {
+    // 1. Update internal state
+    state.no2 = data.NO2;
+    state.mq1 = data.MQ1;
+    state.mq2 = data.MQ2;
+    state.temp = data.TEMP;
+    state.hum = data.HUM;
+    state.uvActive = data.UV === 1;
+
+    /* ── 2. Update card values ─────────────────────────────────── */
+    setElementText("val-no2",  data.NO2.toFixed(2));
+    setElementText("val-mq1",  data.MQ1.toFixed(2));
+    setElementText("val-mq2",  data.MQ2.toFixed(2));
+    setElementText("val-temp", data.TEMP.toFixed(1));
+    setElementText("val-hum",  data.HUM.toFixed(1));
+
+    /* ── 3. UV badge & Schematic feedback ──────────────────────── */
+    const uvBadge = document.getElementById("uv-status");
+    const uvIcon = document.getElementById("uv-icon");
+    if (uvBadge) {
+        uvBadge.textContent = data.UV ? "ACTIVE" : "OFF";
+        uvBadge.classList.toggle("active", data.UV === 1);
+        uvBadge.className = 'fraunces uv-word' + (data.UV ? '' : ' standby-text');
+    }
+    if (uvIcon) {
+        uvIcon.className = 'uv-lamp-icon ' + (data.UV ? 'active' : 'standby');
+    }
+
+    // Update 3D Readout & OLED sim
+    setElementText("three-readout", `NO2: ${data.NO2.toFixed(2)} ppm | MQ1: ${data.MQ1.toFixed(2)} | UV: ${data.UV ? 'ON' : 'OFF'}`);
+    setElementText("oled-val", `NO₂:${data.NO2.toFixed(1)}`);
+
+    /* ── 4. Status indicator logic ──────────────────────────────── */
+    const elStatus = document.getElementById('status-no2');
+    if (elStatus) {
+        if (data.NO2 > 1.0) { // Threshold for ppm
+            elStatus.textContent = 'CRITICAL';
+            elStatus.className = 'reading-status critical';
+        } else if (data.NO2 > 0.4) {
+            elStatus.textContent = 'WARNING';
+            elStatus.className = 'reading-status warning';
+        } else {
+            elStatus.textContent = 'SAFE';
+            elStatus.className = 'reading-status safe';
+        }
+    }
+
+    /* ── 5. Threshold / alert logic ──────────────────────────────── */
+    checkThresholds(data);
+
+    /* ── 6. Chart update ─────────────────────────────────────────── */
+    const nowLabel = new Date(data.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    
+    // Update existing charts
+    if (chartNo2) appendChartPoint(chartNo2, nowLabel, data.NO2);
+    if (chartTemp) appendChartPoint(chartTemp, nowLabel, data.TEMP);
+    if (chartHum) appendChartPoint(chartHum, nowLabel, data.HUM);
+
+    /* ── 7. Last-updated timestamp ───────────────────────────────── */
+    setElementText("last-updated", "Last update: " + nowLabel);
+}
+
+/* ── Threshold checker ───────────────────────────────────────────────────── */
+
+const THRESHOLDS = {
+    NO2:  0.5,   // ppm — WHO 1-hour limit ≈ 0.1 ppm; adjust to your sensor scale
+    MQ1:  2.0,   // ppm — general hazard level for MQ135 equivalent
+    MQ2:  2.0,
 };
 
-function simValue(base, noise, min, max) {
-  const v = base + (Math.random() - 0.5) * noise;
-  return Math.min(max, Math.max(min, Math.round(v * 10) / 10));
+function checkThresholds(data) {
+    const alertBanner = document.getElementById("alert-banner");
+    if (!alertBanner) return;
+
+    const alerts = [];
+    if (data.NO2 >= THRESHOLDS.NO2) alerts.push(`NO2 HIGH: ${data.NO2.toFixed(2)} ppm`);
+    if (data.MQ1 >= THRESHOLDS.MQ1) alerts.push(`MQ1 HIGH: ${data.MQ1.toFixed(2)} ppm`);
+    if (data.MQ2 >= THRESHOLDS.MQ2) alerts.push(`MQ2 HIGH: ${data.MQ2.toFixed(2)} ppm`);
+
+    if (alerts.length > 0) {
+        alertBanner.textContent = "⚠ " + alerts.join("  |  ");
+        alertBanner.style.display = "block";
+    } else {
+        alertBanner.style.display = "none";
+    }
 }
+
+/* ── Chart.js helper — keeps last N points, then slides ─────────────────── */
+
+const MAX_CHART_POINTS = 30;
+
+function appendChartPoint(chart, label, value) {
+    if (!chart) return;
+    chart.data.labels.push(label);
+    chart.data.datasets[0].data.push(value);
+
+    if (chart.data.labels.length > state.maxPoints) {
+        chart.data.labels.shift();
+        chart.data.datasets[0].data.shift();
+    }
+    chart.update("none");
+}
+
+/* ── Connection status indicator ─────────────────────────────────────────── */
+
+function setConnectionStatus(connected) {
+    const dot = document.getElementById("ws-dot");
+    const txt = document.getElementById("ws-status");
+    if (dot) dot.classList.toggle("connected", connected);
+    if (txt) txt.textContent = connected ? "Live" : "Connecting…";
+}
+
+/* ── Tiny helper ─────────────────────────────────────────────────────────── */
+
+function setElementText(id, text) {
+    const el = document.getElementById(id);
+    if (el) el.textContent = text;
+}
+
+/* ── Boot ────────────────────────────────────────────────────────────────── */
+
+document.addEventListener("DOMContentLoaded", () => {
+    connectWS();
+});
+
+
+/* =============================================================================
+   HTML IDs expected by this script — add these to your dashboard if missing:
+
+   <span id="val-no2">--</span>
+   <span id="val-mq1">--</span>
+   <span id="val-mq2">--</span>
+   <span id="val-temp">--</span>
+   <span id="val-hum">--</span>
+
+   <div id="uv-status" class="badge">UV OFF</div>
+
+   <div id="alert-banner" style="display:none"></div>
+
+   <span id="last-updated"></span>
+
+   <!-- Connection indicator -->
+   <span id="ws-dot" class="dot"></span>
+   <span id="ws-status">Connecting…</span>
+
+   CSS for the dot:
+   .dot { width:10px; height:10px; border-radius:50%; background:#888; display:inline-block; }
+   .dot.connected { background:#22c55e; box-shadow: 0 0 6px #22c55e; }
+   ============================================================================= */
+
+// ─── Live data state ───────────────────────────────
+const state = {
+  no2: 0,
+  mq1: 0,
+  mq2: 0,
+  temp: 0,
+  hum: 0,
+  uvActive: false,
+  maxPoints: 60
+};
 
 // ─── 1. HERO SVG PARTICLES ─────────────────────────
 (function initHeroParticles() {
@@ -120,100 +320,7 @@ function simValue(base, noise, min, max) {
 })();
 
 
-// ─── 2. LIVE DATA UPDATE ───────────────────────────
-function updateReadings() {
-  state.no2In = simValue(state.no2In, 12, 140, 220);
-  state.no2Out = simValue(state.no2Out, 6, 30, 80);
-  state.temp = simValue(state.temp, 0.5, 22, 38);
-  state.pressure = simValue(state.pressure, 2, 990, 1030);
-  state.uvActive = state.no2In > 140;
-
-  // Current readings UI
-  const elNo2In = document.getElementById('val-no2-in');
-  const elNo2Out = document.getElementById('val-no2-out');
-  const elTemp = document.getElementById('val-temp');
-  const elPressure = document.getElementById('val-pressure');
-  const elReduction = document.getElementById('val-reduction');
-  const elStatus = document.getElementById('status-no2');
-  const elUvWord = document.getElementById('uv-word');
-  const elUvIcon = document.getElementById('uv-icon');
-
-  if (elNo2In) elNo2In.textContent = Math.round(state.no2In);
-  if (elNo2Out) elNo2Out.textContent = Math.round(state.no2Out);
-  if (elTemp) elTemp.textContent = state.temp.toFixed(1);
-  if (elPressure) elPressure.textContent = Math.round(state.pressure);
-
-  if (elReduction) {
-    const pct = Math.round((1 - state.no2Out / state.no2In) * 100);
-    elReduction.textContent = `↓ ${pct}% reduction`;
-  }
-
-  if (elStatus) {
-    if (state.no2In > 180) {
-      elStatus.textContent = 'CRITICAL';
-      elStatus.className = 'reading-status critical';
-    } else if (state.no2In > 120) {
-      elStatus.textContent = 'WARNING';
-      elStatus.className = 'reading-status warning';
-    } else {
-      elStatus.textContent = 'SAFE';
-      elStatus.className = 'reading-status safe';
-    }
-  }
-
-  if (elUvWord) {
-    elUvWord.textContent = state.uvActive ? 'active' : 'standby';
-    elUvWord.className = 'fraunces uv-word' + (state.uvActive ? '' : ' standby-text');
-  }
-  if (elUvIcon) {
-    elUvIcon.className = 'uv-lamp-icon ' + (state.uvActive ? 'active' : 'standby');
-  }
-
-  // OLED sim
-  const oled = document.getElementById('oled-val');
-  if (oled) oled.textContent = `NO₂:${Math.round(state.no2In)}`;
-
-  // 3D readout
-  const ro = document.getElementById('three-readout');
-  if (ro) ro.textContent = `IN: ${Math.round(state.no2In)} µg/m³ · OUT: ${Math.round(state.no2Out)} µg/m³ · UV: ${state.uvActive ? 'ON' : 'OFF'}`;
-
-  // History arrays
-  const now = new Date();
-  const label = now.getHours().toString().padStart(2,'0') + ':' + now.getMinutes().toString().padStart(2,'0') + ':' + now.getSeconds().toString().padStart(2,'0');
-
-  [state.histNo2In, state.histNo2Out, state.histTemp, state.histPressure, state.labels].forEach(arr => {
-    if (arr.length >= state.maxPoints) arr.shift();
-  });
-  state.histNo2In.push(Math.round(state.no2In));
-  state.histNo2Out.push(Math.round(state.no2Out));
-  state.histTemp.push(parseFloat(state.temp.toFixed(1)));
-  state.histPressure.push(Math.round(state.pressure));
-  state.labels.push(label);
-
-  updateCharts();
-}
-
-// Seed initial history
-for (let i = 0; i < 20; i++) {
-  state.no2In = simValue(175, 20, 140, 220);
-  state.no2Out = simValue(48, 8, 30, 80);
-  state.temp = simValue(28.4, 0.8, 22, 38);
-  state.pressure = simValue(1013, 3, 990, 1030);
-  const d = new Date(Date.now() - (20-i)*2000);
-  const l = d.getHours().toString().padStart(2,'0') + ':' + d.getMinutes().toString().padStart(2,'0') + ':' + d.getSeconds().toString().padStart(2,'0');
-  state.histNo2In.push(Math.round(state.no2In));
-  state.histNo2Out.push(Math.round(state.no2Out));
-  state.histTemp.push(parseFloat(state.temp.toFixed(1)));
-  state.histPressure.push(Math.round(state.pressure));
-  state.labels.push(l);
-}
-
-setInterval(updateReadings, 2000);
-
-
 // ─── 3. CHART.JS GRAPHS ────────────────────────────
-let chartNo2, chartTemp, chartPressure;
-
 const chartDefaults = {
   responsive: true,
   maintainAspectRatio: false,
@@ -261,18 +368,20 @@ function makeLineDataset(label, data, color, fill) {
   };
 }
 
+let chartNo2, chartTemp, chartHum;
+
 function initCharts() {
   const no2Canvas = document.getElementById('chart-no2');
   const tempCanvas = document.getElementById('chart-temp');
-  const pressCanvas = document.getElementById('chart-pressure');
-  if (!no2Canvas || !tempCanvas || !pressCanvas) return;
+  const humCanvas = document.getElementById('chart-pressure'); 
+  if (!no2Canvas || !tempCanvas || !humCanvas) return;
 
   const whoLine = {
     id: 'whoLine',
     beforeDraw(chart) {
       const { ctx, chartArea: { left, right, top, bottom }, scales: { y } } = chart;
       if (!y) return;
-      const yVal = y.getPixelForValue(25);
+      const yVal = y.getPixelForValue(0.1); 
       if (yVal < top || yVal > bottom) return;
       ctx.save();
       ctx.strokeStyle = 'rgba(44,44,40,0.2)';
@@ -288,72 +397,24 @@ function initCharts() {
 
   chartNo2 = new Chart(no2Canvas, {
     type: 'line',
-    data: {
-      labels: [...state.labels],
-      datasets: [
-        makeLineDataset('Incoming NO₂', [...state.histNo2In], '#C0412A', 'rgba(192,65,42,0.05)'),
-        makeLineDataset('Outgoing NO₂', [...state.histNo2Out], '#2A6B47', 'rgba(42,107,71,0.05)')
-      ]
-    },
-    options: {
-      ...chartDefaults,
-      plugins: { ...chartDefaults.plugins, legend: { display: false } },
-      scales: {
-        ...chartDefaults.scales,
-        y: { ...chartDefaults.scales.y, min: 0, max: 250, title: { display: false } }
-      }
-    },
+    data: { labels: [], datasets: [makeLineDataset('NO₂ (ppm)', [], '#C0412A', 'rgba(192,65,42,0.05)')] },
+    options: { ...chartDefaults, scales: { ...chartDefaults.scales, y: { ...chartDefaults.scales.y, min: 0, max: 2 } } },
     plugins: [whoLine]
   });
 
   chartTemp = new Chart(tempCanvas, {
     type: 'line',
-    data: {
-      labels: [...state.labels],
-      datasets: [makeLineDataset('Temperature', [...state.histTemp], '#8B7355', 'rgba(139,115,85,0.06)')]
-    },
-    options: {
-      ...chartDefaults,
-      scales: {
-        ...chartDefaults.scales,
-        y: { ...chartDefaults.scales.y, min: 15, max: 45 }
-      }
-    }
+    data: { labels: [], datasets: [makeLineDataset('Temp (°C)', [], '#8B7355', 'rgba(139,115,85,0.06)')] },
+    options: { ...chartDefaults, scales: { ...chartDefaults.scales, y: { ...chartDefaults.scales.y, min: 15, max: 45 } } }
   });
 
-  chartPressure = new Chart(pressCanvas, {
+  chartHum = new Chart(humCanvas, {
     type: 'line',
-    data: {
-      labels: [...state.labels],
-      datasets: [makeLineDataset('Pressure', [...state.histPressure], '#1A3D2B', 'rgba(26,61,43,0.06)')]
-    },
-    options: {
-      ...chartDefaults,
-      scales: {
-        ...chartDefaults.scales,
-        y: { ...chartDefaults.scales.y, min: 980, max: 1040 }
-      }
-    }
+    data: { labels: [], datasets: [makeLineDataset('Humidity (%)', [], '#1A3D2B', 'rgba(26,61,43,0.06)')] },
+    options: { ...chartDefaults, scales: { ...chartDefaults.scales, y: { ...chartDefaults.scales.y, min: 0, max: 100 } } }
   });
 }
 
-function updateCharts() {
-  if (!chartNo2) return;
-  chartNo2.data.labels = [...state.labels];
-  chartNo2.data.datasets[0].data = [...state.histNo2In];
-  chartNo2.data.datasets[1].data = [...state.histNo2Out];
-  chartNo2.update('none');
-
-  chartTemp.data.labels = [...state.labels];
-  chartTemp.data.datasets[0].data = [...state.histTemp];
-  chartTemp.update('none');
-
-  chartPressure.data.labels = [...state.labels];
-  chartPressure.data.datasets[0].data = [...state.histPressure];
-  chartPressure.update('none');
-}
-
-// Wait for Chart.js to load
 if (typeof Chart !== 'undefined') {
   initCharts();
 } else {
