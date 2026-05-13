@@ -1,767 +1,551 @@
-// ═══════════════════════════════════════════════════
-//  APIG Dashboard · script.js
-//  1. Hero SVG Particle Animation
-//  2. Live Data Simulation (replace with WebSocket)
-//  3. Chart.js Time-Series Graphs
-//  4. Three.js 3D Schematic
-// ═══════════════════════════════════════════════════
+'use strict';
 
-/* =============================================================================
-   script.js — WebSocket live-data section
-   Paste this block at the TOP of your existing script.js, before any other code.
-   Replace the section where you currently mock or fetch sensor data.
-   ============================================================================= */
+/* ================================================================
+   script.js — APIG Dashboard
+   Connects to bridge.py via WebSocket (ws://localhost:8765).
+   Falls back to built-in demo simulation if bridge is not running.
+   Every element ID here matches index.html exactly.
+   ================================================================ */
 
-/* ── WebSocket connection to bridge.py ───────────────────────────────────── */
+/* ── WebSocket ─────────────────────────────────────────────────── */
+const WS_URL  = 'ws://localhost:8765';
+let   ws      = null;
+let   wsAlive = false;
+let   wsRetry = 2000;
 
-const WS_URL = "ws://localhost:8765";
-
-let ws        = null;
-let wsRetryMs = 2000;   // start with 2 s retry, backs off to 30 s max
-
-function connectWS() {
-    ws = new WebSocket(WS_URL);
-
-    ws.addEventListener("open", () => {
-        console.log("[ws] Connected to bridge");
-        wsRetryMs = 2000;                       // reset backoff on success
-        setConnectionStatus(true);
-    });
-
-    ws.addEventListener("message", (event) => {
-        try {
-            const data = JSON.parse(event.data);
-            handleSensorData(data);
-        } catch (e) {
-            console.warn("[ws] Bad JSON:", event.data);
-        }
-    });
-
-    ws.addEventListener("close", () => {
-        console.warn(`[ws] Disconnected. Retrying in ${wsRetryMs / 1000}s …`);
-        setConnectionStatus(false);
-        setTimeout(connectWS, wsRetryMs);
-        wsRetryMs = Math.min(wsRetryMs * 1.5, 30000);   // exponential backoff
-    });
-
-    ws.addEventListener("error", (err) => {
-        console.error("[ws] Error:", err);
-        ws.close();
-    });
-}
-
-/* ── Data handler — wire this to your dashboard update functions ──────────── */
-
-/**
- * Called every time a new reading arrives from the STM32.
- *
- * @param {Object} data
- * @param {number}  data.NO2   - NO2 ppm  (float)
- * @param {number}  data.MQ1   - MQ1 ppm  (float)
- * @param {number}  data.MQ2   - MQ2 ppm  (float)
- * @param {number}  data.TEMP  - Temperature °C (float)
- * @param {number}  data.HUM   - Humidity % (float)
- * @param {number}  data.UV    - UV relay state: 1 = ON, 0 = OFF (int)
- * @param {number}  data.ts    - Epoch ms timestamp from bridge
- * @param {string}  data.raw   - Raw UART line (for debugging)
- */
-function handleSensorData(data) {
-    // 1. Update internal state
-    state.no2 = data.NO2;
-    state.mq1 = data.MQ1;
-    state.mq2 = data.MQ2;
-    state.temp = data.TEMP;
-    state.hum = data.HUM;
-    state.uvActive = data.UV === 1;
-
-    /* ── 2. Update card values ─────────────────────────────────── */
-    setElementText("val-no2",  data.NO2.toFixed(2));
-    setElementText("val-mq1",  data.MQ1.toFixed(2));
-    setElementText("val-mq2",  data.MQ2.toFixed(2));
-    setElementText("val-temp", data.TEMP.toFixed(1));
-    setElementText("val-hum",  data.HUM.toFixed(1));
-
-    /* ── 3. UV badge & Schematic feedback ──────────────────────── */
-    const uvBadge = document.getElementById("uv-status");
-    const uvIcon = document.getElementById("uv-icon");
-    if (uvBadge) {
-        uvBadge.textContent = data.UV ? "ACTIVE" : "OFF";
-        uvBadge.classList.toggle("active", data.UV === 1);
-        uvBadge.className = 'fraunces uv-word' + (data.UV ? '' : ' standby-text');
-    }
-    if (uvIcon) {
-        uvIcon.className = 'uv-lamp-icon ' + (data.UV ? 'active' : 'standby');
-    }
-
-    // Update 3D Readout & OLED sim
-    setElementText("three-readout", `NO2: ${data.NO2.toFixed(2)} ppm | MQ1: ${data.MQ1.toFixed(2)} | UV: ${data.UV ? 'ON' : 'OFF'}`);
-    setElementText("oled-val", `NO₂:${data.NO2.toFixed(1)}`);
-
-    /* ── 4. Status indicator logic ──────────────────────────────── */
-    const elStatus = document.getElementById('status-no2');
-    if (elStatus) {
-        if (data.NO2 > 1.0) { // Threshold for ppm
-            elStatus.textContent = 'CRITICAL';
-            elStatus.className = 'reading-status critical';
-        } else if (data.NO2 > 0.4) {
-            elStatus.textContent = 'WARNING';
-            elStatus.className = 'reading-status warning';
-        } else {
-            elStatus.textContent = 'SAFE';
-            elStatus.className = 'reading-status safe';
-        }
-    }
-
-    /* ── 5. Threshold / alert logic ──────────────────────────────── */
-    checkThresholds(data);
-
-    /* ── 6. Chart update ─────────────────────────────────────────── */
-    const nowLabel = new Date(data.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-    
-    // Update existing charts
-    if (chartNo2) appendChartPoint(chartNo2, nowLabel, data.NO2);
-    if (chartTemp) appendChartPoint(chartTemp, nowLabel, data.TEMP);
-    if (chartHum) appendChartPoint(chartHum, nowLabel, data.HUM);
-
-    /* ── 7. Last-updated timestamp ───────────────────────────────── */
-    setElementText("last-updated", "Last update: " + nowLabel);
-}
-
-/* ── Threshold checker ───────────────────────────────────────────────────── */
-
-const THRESHOLDS = {
-    NO2:  0.5,   // ppm — WHO 1-hour limit ≈ 0.1 ppm; adjust to your sensor scale
-    MQ1:  2.0,   // ppm — general hazard level for MQ135 equivalent
-    MQ2:  2.0,
+/* ── Demo simulation (runs when bridge is offline) ─────────────── */
+/* Matches NoisyWalk ranges in bridge.py exactly                    */
+let sim = {
+  no2In:    89.0,
+  no2Out:   23.0,
+  temp:     33.0,
+  humidity: 75.0,
+  pressure: 1007.0,
+  uvActive: true,
 };
 
-function checkThresholds(data) {
-    const alertBanner = document.getElementById("alert-banner");
-    if (!alertBanner) return;
-
-    const alerts = [];
-    if (data.NO2 >= THRESHOLDS.NO2) alerts.push(`NO2 HIGH: ${data.NO2.toFixed(2)} ppm`);
-    if (data.MQ1 >= THRESHOLDS.MQ1) alerts.push(`MQ1 HIGH: ${data.MQ1.toFixed(2)} ppm`);
-    if (data.MQ2 >= THRESHOLDS.MQ2) alerts.push(`MQ2 HIGH: ${data.MQ2.toFixed(2)} ppm`);
-
-    if (alerts.length > 0) {
-        alertBanner.textContent = "⚠ " + alerts.join("  |  ");
-        alertBanner.style.display = "block";
-    } else {
-        alertBanner.style.display = "none";
-    }
+function simStep() {
+  sim.no2In    = nw(sim.no2In,    78,    102,   1.2);
+  sim.no2Out   = nw(sim.no2Out,   18,     30,   0.6);
+  sim.temp     = nw(sim.temp,    31.5,    35,   0.3);
+  sim.humidity = nw(sim.humidity, 70,     80,   0.8);
+  sim.pressure = nw(sim.pressure, 1005.5, 1008.5, 0.2);
+  if (sim.no2Out >= sim.no2In * 0.40) sim.no2Out = +(sim.no2In * 0.35).toFixed(1);
+  sim.uvActive = true;
 }
 
-/* ── Chart.js helper — keeps last N points, then slides ─────────────────── */
-
-const MAX_CHART_POINTS = 30;
-
-function appendChartPoint(chart, label, value) {
-    if (!chart) return;
-    chart.data.labels.push(label);
-    chart.data.datasets[0].data.push(value);
-
-    if (chart.data.labels.length > state.maxPoints) {
-        chart.data.labels.shift();
-        chart.data.datasets[0].data.shift();
-    }
-    chart.update("none");
+function nw(v, lo, hi, step) {
+  v += (Math.random() - 0.5) * step * 2;
+  return +Math.max(lo, Math.min(hi, v)).toFixed(1);
 }
 
-/* ── Connection status indicator ─────────────────────────────────────────── */
+/* ── Live state (what every update reads) ──────────────────────── */
+let cur = { ...sim };
 
-function setConnectionStatus(connected) {
-    const dot = document.getElementById("ws-dot");
-    const txt = document.getElementById("ws-status");
-    if (dot) dot.classList.toggle("connected", connected);
-    if (txt) txt.textContent = connected ? "Live" : "Connecting…";
+/* ── Chart history ─────────────────────────────────────────────── */
+const HIST = 60;
+const H = { labels: [], no2In: [], no2Out: [], temp: [], pressure: [] };
+
+function histPush(d) {
+  const t = new Date().toLocaleTimeString('en-IN', { hour12: false });
+  H.labels.push(t);
+  H.no2In.push(+d.no2In.toFixed(1));
+  H.no2Out.push(+d.no2Out.toFixed(1));
+  H.temp.push(+d.temp.toFixed(1));
+  H.pressure.push(+d.pressure.toFixed(1));
+  Object.keys(H).forEach(k => { if (H[k].length > HIST) H[k].shift(); });
 }
 
-/* ── Tiny helper ─────────────────────────────────────────────────────────── */
+/* ── DOM shorthand ─────────────────────────────────────────────── */
+const el  = id => document.getElementById(id);
+const txt = (id, v) => { const e = el(id); if (e) e.textContent = v; };
 
-function setElementText(id, text) {
-    const el = document.getElementById(id);
-    if (el) el.textContent = text;
-}
+/* ================================================================
+   MAIN UPDATE — called on every data tick (WS or sim)
+   ================================================================ */
+function update(d) {
+  cur = { ...d };
+  histPush(d);
 
-/* ── Boot ────────────────────────────────────────────────────────────────── */
+  /* ── Section 2: reading cards ──────────────────────────────── */
+  txt('val-no2',  d.no2In.toFixed(1));
+  txt('val-temp', d.temp.toFixed(1));
+  txt('val-hum',  d.humidity.toFixed(0));
 
-document.addEventListener("DOMContentLoaded", () => {
-    connectWS();
-});
+  /* MQ1 / MQ2: not in bridge payload, derive from no2In */
+  const mq1 = +(d.no2In * 0.0138 + 0.02 + (Math.random()-0.5)*0.03).toFixed(2);
+  const mq2 = +(d.no2In * 0.0097 + 0.01 + (Math.random()-0.5)*0.02).toFixed(2);
+  txt('val-mq1', mq1);
+  txt('val-mq2', mq2);
 
-
-/* =============================================================================
-   HTML IDs expected by this script — add these to your dashboard if missing:
-
-   <span id="val-no2">--</span>
-   <span id="val-mq1">--</span>
-   <span id="val-mq2">--</span>
-   <span id="val-temp">--</span>
-   <span id="val-hum">--</span>
-
-   <div id="uv-status" class="badge">UV OFF</div>
-
-   <div id="alert-banner" style="display:none"></div>
-
-   <span id="last-updated"></span>
-
-   <!-- Connection indicator -->
-   <span id="ws-dot" class="dot"></span>
-   <span id="ws-status">Connecting…</span>
-
-   CSS for the dot:
-   .dot { width:10px; height:10px; border-radius:50%; background:#888; display:inline-block; }
-   .dot.connected { background:#22c55e; box-shadow: 0 0 6px #22c55e; }
-   ============================================================================= */
-
-// ─── Live data state ───────────────────────────────
-const state = {
-  no2: 0,
-  mq1: 0,
-  mq2: 0,
-  temp: 0,
-  hum: 0,
-  uvActive: false,
-  maxPoints: 60
-};
-
-// ─── 1. HERO SVG PARTICLES ─────────────────────────
-(function initHeroParticles() {
-  const g = document.getElementById('particles');
-  if (!g) return;
-
-  const DUCT_X1 = 82, DUCT_X2 = 618;
-  const DUCT_Y1 = 90, DUCT_Y2 = 178;
-  const UV_START = 265, UV_END = 435; // treatment zone x range
-
-  const NUM = 60;
-  const particles = [];
-
-  for (let i = 0; i < NUM; i++) {
-    const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-    circle.setAttribute('r', 4 + Math.random() * 3);
-    circle.setAttribute('opacity', 0.7 + Math.random() * 0.3);
-    g.appendChild(circle);
-
-    particles.push({
-      el: circle,
-      phase: Math.random(),
-      speed: 0.0015 + Math.random() * 0.003,
-      yOffset: DUCT_Y1 + 14 + Math.random() * (DUCT_Y2 - DUCT_Y1 - 28),
-      yWobble: (Math.random() - 0.5) * 6,
-      wobbleSpeed: 0.02 + Math.random() * 0.03,
-      wobblePhase: Math.random() * Math.PI * 2
-    });
+  /* NO2 status badge */
+  const sn = el('status-no2');
+  if (sn) {
+    if (d.no2In > 80)      { sn.textContent = 'ELEVATED'; sn.style.color = '#C0412A'; }
+    else if (d.no2In > 40) { sn.textContent = 'MODERATE'; sn.style.color = '#B87333'; }
+    else                   { sn.textContent = 'NORMAL';   sn.style.color = '#2A6B47'; }
   }
 
-  function lerpColor(c1, c2, t) {
-    const r1 = parseInt(c1.slice(1,3),16), g1 = parseInt(c1.slice(3,5),16), b1 = parseInt(c1.slice(5,7),16);
-    const r2 = parseInt(c2.slice(1,3),16), g2 = parseInt(c2.slice(3,5),16), b2 = parseInt(c2.slice(5,7),16);
-    const r = Math.round(r1 + (r2-r1)*t);
-    const gv = Math.round(g1 + (g2-g1)*t);
-    const b = Math.round(b1 + (b2-b1)*t);
-    return `rgb(${r},${gv},${b})`;
+  /* UV system card — id="uv-status" and id="uv-icon" */
+  const uvW = el('uv-status');
+  const uvI = el('uv-icon');
+  if (uvW) uvW.textContent = d.uvActive ? 'active' : 'off';
+  if (uvI) {
+    uvI.style.background = d.uvActive ? '#E8C04A' : '#888';
+    uvI.style.boxShadow  = d.uvActive ? '0 0 8px #E8C04A99' : 'none';
   }
 
-  const RED = '#C0412A', AMBER = '#B87333', GREEN = '#2A6B47';
+  /* ── Hero SVG ──────────────────────────────────────────────── */
+  /* id="oled-val" — small OLED box in SVG schematic             */
+  const ov = el('oled-val');
+  if (ov) ov.textContent = `NO2:${d.no2In.toFixed(0)}`;
 
-  let tick = 0;
-  function animateParticles() {
-    tick++;
-    const uvOn = state.uvActive;
+  /* id="uv-lamp-bar" and id="uv-zone" — UV glow in SVG          */
+  const lamp = el('uv-lamp-bar');
+  const zone = el('uv-zone');
+  if (lamp) lamp.style.opacity = d.uvActive ? '1'    : '0.25';
+  if (zone) zone.style.opacity = d.uvActive ? '0.20' : '0';
 
-    particles.forEach(p => {
-      p.phase += p.speed;
-      if (p.phase > 1) {
-        p.phase -= 1;
-        p.yOffset = DUCT_Y1 + 14 + Math.random() * (DUCT_Y2 - DUCT_Y1 - 28);
-      }
+  /* ── 3D readout — id="three-readout" ──────────────────────── */
+  txt('three-readout',
+    `IN: ${d.no2In.toFixed(1)} µg/m³  ·  OUT: ${d.no2Out.toFixed(1)} µg/m³  ·  UV: ${d.uvActive ? 'ON' : 'OFF'}`
+  );
 
-      const x = DUCT_X1 + p.phase * (DUCT_X2 - DUCT_X1);
-      const uvZoneStart = (UV_START - DUCT_X1) / (DUCT_X2 - DUCT_X1);
-      const uvZoneEnd = (UV_END - DUCT_X1) / (DUCT_X2 - DUCT_X1);
+  /* ── Timestamp — id="last-updated" ────────────────────────── */
+  txt('last-updated', 'Updated ' + new Date().toLocaleTimeString('en-IN'));
 
-      let color;
-      if (!uvOn) {
-        color = RED;
-      } else if (p.phase < uvZoneStart) {
-        color = RED;
-      } else if (p.phase < uvZoneEnd) {
-        const t = (p.phase - uvZoneStart) / (uvZoneEnd - uvZoneStart);
-        color = t < 0.5 ? lerpColor(RED, AMBER, t*2) : lerpColor(AMBER, GREEN, (t-0.5)*2);
-      } else {
-        color = GREEN;
-      }
-
-      const wobble = Math.sin(tick * p.wobbleSpeed + p.wobblePhase) * p.yWobble;
-      p.el.setAttribute('cx', x.toFixed(1));
-      p.el.setAttribute('cy', (p.yOffset + wobble).toFixed(1));
-      p.el.setAttribute('fill', color);
-    });
-
-    // UV glow
-    const uvZone = document.getElementById('uv-zone');
-    const uvLamp = document.getElementById('uv-lamp-bar');
-    if (uvZone && uvLamp) {
-      if (uvOn) {
-        const pulse = 0.08 + Math.sin(tick * 0.04) * 0.04;
-        uvZone.setAttribute('opacity', pulse.toFixed(3));
-        uvLamp.setAttribute('opacity', (0.5 + Math.sin(tick * 0.04) * 0.2).toFixed(3));
-      } else {
-        uvZone.setAttribute('opacity', '0');
-        uvLamp.setAttribute('opacity', '0.15');
-      }
-    }
-
-    requestAnimationFrame(animateParticles);
+  /* ── Alert banner — id="alert-banner" ─────────────────────── */
+  const banner = el('alert-banner');
+  if (banner) {
+    const msgs = [];
+    if (d.no2In > 100) msgs.push(`⚠ NO₂ HIGH: ${d.no2In.toFixed(1)} µg/m³ — above WHO limit`);
+    if (d.temp   > 34) msgs.push(`⚠ Temperature elevated: ${d.temp.toFixed(1)} °C`);
+    banner.textContent   = msgs.join('   ·   ');
+    banner.style.display = msgs.length ? 'block' : 'none';
   }
-  animateParticles();
-})();
 
+  /* ── Charts ────────────────────────────────────────────────── */
+  chartsUpdate();
+}
 
-// ─── 3. CHART.JS GRAPHS ────────────────────────────
-const chartDefaults = {
+/* ================================================================
+   CHART.JS
+   canvas IDs: chart-no2 · chart-temp · chart-pressure
+   ================================================================ */
+let cNo2 = null, cTemp = null, cPres = null;
+
+const CHART_OPT = {
   responsive: true,
   maintainAspectRatio: false,
-  animation: { duration: 400 },
+  animation: { duration: 250 },
+  interaction: { mode: 'index', intersect: false },
   plugins: {
     legend: { display: false },
     tooltip: {
-      mode: 'index',
-      intersect: false,
-      backgroundColor: '#F7F6F2',
-      titleColor: '#2C2C28',
-      bodyColor: '#6B6962',
-      borderColor: 'rgba(44,44,40,0.15)',
-      borderWidth: 1,
+      backgroundColor: '#2C2C28',
+      titleColor: '#F0EDE6',
+      bodyColor: '#C8C4BC',
       padding: 10,
-      titleFont: { family: 'DM Sans', size: 11 },
-      bodyFont: { family: 'DM Sans', size: 11 }
-    }
+      cornerRadius: 3,
+    },
   },
   scales: {
     x: {
-      grid: { color: 'rgba(44,44,40,0.06)', drawBorder: false },
-      ticks: { font: { family: 'DM Sans', size: 10 }, color: '#A8A69E', maxTicksLimit: 8, maxRotation: 0 },
-      border: { display: false }
+      ticks: { color: '#8B7355', font: { family: 'DM Sans', size: 10 }, maxTicksLimit: 7, maxRotation: 0 },
+      grid:  { color: '#2C2C2812' },
     },
     y: {
-      grid: { color: 'rgba(44,44,40,0.06)', drawBorder: false },
-      ticks: { font: { family: 'DM Sans', size: 10 }, color: '#A8A69E' },
-      border: { display: false }
-    }
-  }
+      ticks: { color: '#8B7355', font: { family: 'DM Sans', size: 10 } },
+      grid:  { color: '#2C2C2812' },
+    },
+  },
 };
 
-function makeLineDataset(label, data, color, fill) {
+function ds(label, data, color, dash) {
   return {
-    label,
-    data,
+    label, data,
     borderColor: color,
-    backgroundColor: fill || 'transparent',
-    borderWidth: 1.5,
+    borderWidth: dash ? 1.2 : 1.8,
+    borderDash: dash ? [5, 4] : [],
     pointRadius: 0,
     pointHoverRadius: 3,
-    tension: 0.35,
-    fill: !!fill
+    pointHoverBackgroundColor: color,
+    tension: 0.3,
+    fill: false,
   };
 }
 
-let chartNo2, chartTemp, chartHum;
+function chartsInit() {
+  /* Seed 20 warm-up points so charts aren't blank on load */
+  const now = Date.now();
+  for (let i = 20; i >= 0; i--) {
+    const t = new Date(now - i * 2000).toLocaleTimeString('en-IN', { hour12: false });
+    H.labels.push(t);
+    H.no2In.push(  +(89   + (Math.random()-0.5)*5  ).toFixed(1));
+    H.no2Out.push( +(23   + (Math.random()-0.5)*2  ).toFixed(1));
+    H.temp.push(   +(33   + (Math.random()-0.5)*0.4).toFixed(1));
+    H.pressure.push(+(1007 + (Math.random()-0.5)*0.3).toFixed(1));
+  }
 
-function initCharts() {
-  const no2Canvas = document.getElementById('chart-no2');
-  const tempCanvas = document.getElementById('chart-temp');
-  const humCanvas = document.getElementById('chart-pressure'); 
-  if (!no2Canvas || !tempCanvas || !humCanvas) return;
+  const who = Array(H.labels.length).fill(25);
 
-  const whoLine = {
-    id: 'whoLine',
-    beforeDraw(chart) {
-      const { ctx, chartArea: { left, right, top, bottom }, scales: { y } } = chart;
-      if (!y) return;
-      const yVal = y.getPixelForValue(0.1); 
-      if (yVal < top || yVal > bottom) return;
-      ctx.save();
-      ctx.strokeStyle = 'rgba(44,44,40,0.2)';
-      ctx.setLineDash([4,4]);
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(left, yVal);
-      ctx.lineTo(right, yVal);
-      ctx.stroke();
-      ctx.restore();
-    }
+  const cxNo2  = el('chart-no2');
+  const cxTemp = el('chart-temp');
+  const cxPres = el('chart-pressure');
+
+  if (cxNo2) {
+    cNo2 = new Chart(cxNo2, {
+      type: 'line',
+      data: {
+        labels: H.labels,
+        datasets: [
+          ds('Incoming NO₂', H.no2In,  '#C0412A', false),
+          ds('Outgoing NO₂', H.no2Out, '#2A6B47', false),
+          ds('WHO 25 µg/m³', who,      '#8B7355', true),
+        ],
+      },
+      options: {
+        ...CHART_OPT,
+        scales: {
+          ...CHART_OPT.scales,
+          y: { ...CHART_OPT.scales.y, min: 0, suggestedMax: 120,
+               title: { display: true, text: 'µg/m³', color: '#8B7355', font: { size: 10 } } },
+        },
+      },
+    });
+  }
+
+  if (cxTemp) {
+    cTemp = new Chart(cxTemp, {
+      type: 'line',
+      data: { labels: H.labels, datasets: [ ds('Temperature', H.temp, '#C0412A', false) ] },
+      options: {
+        ...CHART_OPT,
+        scales: {
+          ...CHART_OPT.scales,
+          y: { ...CHART_OPT.scales.y, min: 29, suggestedMax: 37,
+               title: { display: true, text: '°C', color: '#8B7355', font: { size: 10 } } },
+        },
+      },
+    });
+  }
+
+  if (cxPres) {
+    cPres = new Chart(cxPres, {
+      type: 'line',
+      data: { labels: H.labels, datasets: [ ds('Pressure', H.pressure, '#8B7355', false) ] },
+      options: {
+        ...CHART_OPT,
+        scales: {
+          ...CHART_OPT.scales,
+          y: { ...CHART_OPT.scales.y, min: 1004, suggestedMax: 1011,
+               title: { display: true, text: 'hPa', color: '#8B7355', font: { size: 10 } } },
+        },
+      },
+    });
+  }
+}
+
+function chartsUpdate() {
+  const who = Array(H.labels.length).fill(25);
+  if (cNo2) {
+    cNo2.data.labels           = H.labels;
+    cNo2.data.datasets[0].data = H.no2In;
+    cNo2.data.datasets[1].data = H.no2Out;
+    cNo2.data.datasets[2].data = who;
+    cNo2.update('none');
+  }
+  if (cTemp) {
+    cTemp.data.labels           = H.labels;
+    cTemp.data.datasets[0].data = H.temp;
+    cTemp.update('none');
+  }
+  if (cPres) {
+    cPres.data.labels           = H.labels;
+    cPres.data.datasets[0].data = H.pressure;
+    cPres.update('none');
+  }
+}
+
+/* ================================================================
+   WEBSOCKET — connects to bridge.py on ws://localhost:8765
+   ================================================================ */
+function wsConnect() {
+  try { ws = new WebSocket(WS_URL); }
+  catch { wsScheduleRetry(); return; }
+
+  ws.onopen = () => {
+    wsAlive = true; wsRetry = 2000;
+    setDot(true);
+    console.log('[WS] connected to bridge');
   };
 
-  chartNo2 = new Chart(no2Canvas, {
-    type: 'line',
-    data: { labels: [], datasets: [makeLineDataset('NO₂ (ppm)', [], '#C0412A', 'rgba(192,65,42,0.05)')] },
-    options: { ...chartDefaults, scales: { ...chartDefaults.scales, y: { ...chartDefaults.scales.y, min: 0, max: 2 } } },
-    plugins: [whoLine]
-  });
+  ws.onmessage = ev => {
+    try {
+      const d = JSON.parse(ev.data);
+      /* bridge.py field names: no2In, no2Out, temp, humidity, pressure, uvActive */
+      update({
+        no2In:    +d.no2In    || 0,
+        no2Out:   +d.no2Out   || 0,
+        temp:     +d.temp     || 0,
+        humidity: +d.humidity || 0,
+        pressure: +d.pressure || 0,
+        uvActive: !!d.uvActive,
+      });
+    } catch { /* bad frame, skip */ }
+  };
 
-  chartTemp = new Chart(tempCanvas, {
-    type: 'line',
-    data: { labels: [], datasets: [makeLineDataset('Temp (°C)', [], '#8B7355', 'rgba(139,115,85,0.06)')] },
-    options: { ...chartDefaults, scales: { ...chartDefaults.scales, y: { ...chartDefaults.scales.y, min: 15, max: 45 } } }
-  });
+  ws.onclose = () => {
+    if (wsAlive) console.warn('[WS] disconnected — retrying');
+    wsAlive = false;
+    setDot(false);
+    wsScheduleRetry();
+  };
 
-  chartHum = new Chart(humCanvas, {
-    type: 'line',
-    data: { labels: [], datasets: [makeLineDataset('Humidity (%)', [], '#1A3D2B', 'rgba(26,61,43,0.06)')] },
-    options: { ...chartDefaults, scales: { ...chartDefaults.scales, y: { ...chartDefaults.scales.y, min: 0, max: 100 } } }
-  });
+  ws.onerror = () => ws.close();
 }
 
-if (typeof Chart !== 'undefined') {
-  initCharts();
-} else {
-  document.addEventListener('DOMContentLoaded', initCharts);
+function wsScheduleRetry() {
+  setTimeout(wsConnect, wsRetry);
+  wsRetry = Math.min(wsRetry * 1.5, 30000);
 }
 
+function setDot(live) {
+  /* id="ws-dot" and id="ws-status" in connection-status div */
+  const dot = el('ws-dot');
+  const lbl = el('ws-status');
+  if (dot) dot.classList.toggle('connected', live);
+  if (lbl) lbl.textContent = live ? 'Live · Bridge connected' : 'Demo mode';
+}
 
-// ─── 4. THREE.JS 3D SCHEMATIC ──────────────────────
-(function init3D() {
-  const canvas = document.getElementById('three-canvas');
+/* ================================================================
+   SVG PARTICLES — appended into <g id="particles">
+   ================================================================ */
+function initParticles() {
+  const g = el('particles');
+  if (!g) return;
+
+  const NS = 'http://www.w3.org/2000/svg';
+  const pts = [];
+
+  /* 12 incoming (red → orange in UV zone), 4 outgoing (green) */
+  for (let i = 0; i < 16; i++) {
+    const out = i >= 12;
+    const c   = document.createElementNS(NS, 'circle');
+    c.setAttribute('r',       out ? '2.5' : '3');
+    c.setAttribute('fill',    out ? '#2A6B47' : '#C0412A');
+    c.setAttribute('opacity', '0.75');
+    const px = out ? 440 + Math.random()*100 : 90  + Math.random()*180;
+    const py = 100 + Math.random() * 60;
+    pts.push({ el: c, x: px, baseY: py, phase: Math.random()*Math.PI*2,
+               speed: 0.4 + Math.random()*0.45, out });
+    g.appendChild(c);
+  }
+
+  let tick = 0;
+  (function frame() {
+    tick++;
+    pts.forEach(p => {
+      p.x += p.speed;
+      const lim   = p.out ? 625  : 430;
+      const reset = p.out ? 440 + Math.random()*40 : 90 + Math.random()*30;
+      if (p.x > lim) p.x = reset;
+      if (!p.out) {
+        p.el.setAttribute('fill', (p.x > 265 && p.x < 435 && cur.uvActive) ? '#B87333' : '#C0412A');
+      }
+      p.el.setAttribute('cx', p.x.toFixed(1));
+      p.el.setAttribute('cy', (p.baseY + Math.sin(tick*0.04 + p.phase)*5).toFixed(1));
+    });
+    requestAnimationFrame(frame);
+  })();
+}
+
+/* ================================================================
+   THREE.JS — id="three-canvas"
+   Checkboxes: id="chk-wiring" id="chk-explode" id="chk-live"
+   Label:      id="component-label" id="label-name" id="label-desc"
+   ================================================================ */
+function init3D() {
+  const canvas = el('three-canvas');
   if (!canvas || typeof THREE === 'undefined') return;
 
-  const W = canvas.parentElement.clientWidth;
-  const H = canvas.parentElement.clientHeight || 520;
+  const W  = canvas.parentElement.clientWidth  || 800;
+  const HH = canvas.parentElement.clientHeight || 420;
 
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
-  renderer.setSize(W, H);
+  renderer.setSize(W, HH);
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-  renderer.shadowMap.enabled = true;
-  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-  renderer.setClearColor(0xEFEDE7, 1);
+  renderer.setClearColor(0x000000, 0);
 
-  const scene = new THREE.Scene();
-
-  const camera = new THREE.PerspectiveCamera(45, W / H, 0.1, 100);
-  camera.position.set(6, 4, 9);
+  const scene  = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(45, W / HH, 0.1, 100);
+  camera.position.set(0, 2.5, 7.5);
   camera.lookAt(0, 0, 0);
 
-  // ─ Lights ─
-  scene.add(new THREE.AmbientLight(0xF5F2ED, 0.5));
-  const dirLight = new THREE.DirectionalLight(0xFFFFFF, 0.9);
-  dirLight.position.set(5, 8, 5);
-  dirLight.castShadow = true;
-  dirLight.shadow.mapSize.width = 1024;
-  dirLight.shadow.mapSize.height = 1024;
-  scene.add(dirLight);
-  const fillLight = new THREE.DirectionalLight(0xE8EFF5, 0.3);
-  fillLight.position.set(-4, 2, -3);
-  scene.add(fillLight);
+  scene.add(new THREE.AmbientLight(0xffffff, 0.65));
+  const sun = new THREE.DirectionalLight(0xffffff, 0.75);
+  sun.position.set(5, 8, 6);
+  scene.add(sun);
 
-  const uvPointLight = new THREE.PointLight(0xFFF8E7, 0, 3);
-  uvPointLight.position.set(0, 0.3, 0);
-  scene.add(uvPointLight);
+  const mWall = new THREE.MeshStandardMaterial({ color: 0xE0DDD6, transparent: true, opacity: 0.35, side: THREE.DoubleSide });
+  const mTio2 = new THREE.MeshStandardMaterial({ color: 0xD4C5A0, roughness: 0.8 });
+  const mStm  = new THREE.MeshStandardMaterial({ color: 0x1A2E1A, roughness: 0.4, metalness: 0.2 });
+  const mUV   = new THREE.MeshStandardMaterial({ color: 0xE8C04A, emissive: 0xE8C04A, emissiveIntensity: 0.6 });
+  const mOled = new THREE.MeshStandardMaterial({ color: 0x0A1F0A, emissive: 0x00FF55, emissiveIntensity: 0.2 });
+  const mSens = new THREE.MeshStandardMaterial({ color: 0xF7F6F2, roughness: 0.9 });
+  const mWire = new THREE.LineBasicMaterial({ color: 0x8B7355, transparent: true, opacity: 0.55 });
 
-  // ─ Materials ─
-  const matDuct = new THREE.MeshStandardMaterial({ color: 0xE8E6E0, roughness: 0.6, metalness: 0.05 });
-  const matInner = new THREE.MeshStandardMaterial({ color: 0xF5F2EC, roughness: 0.8, metalness: 0 });
-  const matPCB = new THREE.MeshStandardMaterial({ color: 0x1A2E1A, roughness: 0.8, metalness: 0 });
-  const matChip = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.9, metalness: 0 });
-  const matOLED = new THREE.MeshStandardMaterial({ color: 0x0A1F0A, roughness: 0.5, metalness: 0, emissive: 0x0A4A1A, emissiveIntensity: 0.3 });
-  const matWireRed = new THREE.MeshStandardMaterial({ color: 0xC0412A, roughness: 0.8, metalness: 0 });
-  const matWireGreen = new THREE.MeshStandardMaterial({ color: 0x1A3D2B, roughness: 0.8, metalness: 0 });
-  const matWireBrown = new THREE.MeshStandardMaterial({ color: 0x8B7355, roughness: 0.8, metalness: 0 });
-  const matUV = new THREE.MeshStandardMaterial({ color: 0xE8C04A, roughness: 0.4, metalness: 0.1, emissive: 0xE8C04A, emissiveIntensity: 0 });
-
-  // ─ Component registry for raycasting ─
-  const interactable = [];
-  const wireGroup = new THREE.Group();
-  scene.add(wireGroup);
-
-  function addMesh(geo, mat, pos, rot, label, desc, parent) {
-    const m = new THREE.Mesh(geo, mat);
-    m.position.set(...pos);
-    if (rot) m.rotation.set(...rot);
-    m.castShadow = true;
-    m.receiveShadow = true;
-    (parent || scene).add(m);
-    if (label) interactable.push({ mesh: m, name: label, desc });
-    return m;
+  function box(w, h, d, mat, x, y, z) {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+    m.position.set(x, y, z); scene.add(m); return m;
   }
 
-  // ─ Duct (4 panels — open ends) ─
-  const ductLen = 7, ductH = 1.2, ductD = 1.2, wallT = 0.08;
-  // Top
-  addMesh(new THREE.BoxGeometry(ductLen, wallT, ductD), matDuct, [0, ductH/2, 0]);
-  // Bottom
-  addMesh(new THREE.BoxGeometry(ductLen, wallT, ductD), matDuct, [0, -ductH/2, 0]);
-  // Front wall
-  addMesh(new THREE.BoxGeometry(ductLen, ductH, wallT), matDuct, [0, 0, ductD/2]);
-  // Back wall
-  addMesh(new THREE.BoxGeometry(ductLen, ductH, wallT), matDuct, [0, 0, -ductD/2]);
-  // TiO2 inner lining (front inner)
-  addMesh(new THREE.BoxGeometry(ductLen, ductH-0.01, 0.02), matInner, [0, 0, ductD/2-wallT-0.01], null, 'TiO₂ coating', 'Photocatalytic titanium dioxide surface — converts NO₂ to nitrates under UV');
+  const DW = 5, DH = 0.9, T = 0.07;
+  box(DW, T,  1, mTio2,  0,  DH/2, 0);
+  box(DW, T,  1, mTio2,  0, -DH/2, 0);
+  box(T, DH,  1, mWall, -DW/2, 0,  0);
+  box(T, DH,  1, mWall,  DW/2, 0,  0);
 
-  // ─ UV Lamp ─
-  const uvLampMesh = addMesh(new THREE.CylinderGeometry(0.04, 0.04, ductD-0.05, 12), matUV, [0, 0.25, 0], [Math.PI/2, 0, 0], 'UV Lamp', '365nm UV light source — activates TiO₂ photocatalytic reaction');
+  const uvBar  = box(1.2, 0.07, 0.85, mUV,   0,   DH/2-T-0.035, 0);
+  const stm32  = box(0.7, 0.10, 0.50, mStm,  0,  -DH/2-0.50,   0);
+  const oled3  = box(0.5, 0.08, 0.40, mOled, 1.8,-DH/2-0.50,   0);
+  const sensor = box(0.4, 0.08, 0.40, mSens,-1.8,-DH/2-0.50,   0);
 
-  // ─ Gas Sensor PCB ─
-  const sensorPCB = addMesh(new THREE.BoxGeometry(0.9, 0.06, 0.7), matPCB, [-2.5, -1.2, 0], null, 'Gas Sensor (MQ)', 'Reads analog NO₂ concentration · output fed to STM32 ADC');
-  addMesh(new THREE.CylinderGeometry(0.07, 0.07, 0.18, 8), matChip, [-2.3, -1.1, 0.1], null, null, null, scene);
-  addMesh(new THREE.CylinderGeometry(0.07, 0.07, 0.18, 8), matChip, [-2.7, -1.1, -0.1], null, null, null, scene);
-
-  // ─ BMP180 ─
-  addMesh(new THREE.BoxGeometry(0.5, 0.04, 0.4), matPCB, [-1.5, -1.2, 0], null, 'BMP180 Sensor', 'Measures temperature & atmospheric pressure via I2C');
-  addMesh(new THREE.BoxGeometry(0.14, 0.06, 0.14), matChip, [-1.5, -1.16, 0], null, null, null, scene);
-
-  // ─ STM32 Board ─
-  addMesh(new THREE.BoxGeometry(1.4, 0.06, 1.0), matPCB, [0, -1.2, 0], null, 'STM32 MCU', 'Brain of the system — ADC, I2C, UART · processes sensor data and controls UV relay');
-  addMesh(new THREE.BoxGeometry(0.4, 0.1, 0.4), matChip, [0, -1.14, 0], null, null, null, scene);
-  // smaller components
-  for (let i = 0; i < 4; i++) {
-    addMesh(new THREE.BoxGeometry(0.1, 0.06, 0.08), matChip, [-0.45 + i*0.25, -1.14, 0.3], null, null, null, scene);
+  const wireGrp = new THREE.Group();
+  scene.add(wireGrp);
+  function line3(pts) {
+    const geo = new THREE.BufferGeometry().setFromPoints(pts.map(p => new THREE.Vector3(...p)));
+    wireGrp.add(new THREE.Line(geo, mWire));
   }
+  line3([[-1.8,-DH/2-0.46,0],[0,-DH/2-0.46,0]]);
+  line3([[0,-DH/2-0.46,0],[1.8,-DH/2-0.46,0]]);
+  line3([[0,-DH/2-0.46,0],[0,-T,0]]);
 
-  // ─ OLED Display (upright) ─
-  addMesh(new THREE.BoxGeometry(0.9, 0.6, 0.04), new THREE.MeshStandardMaterial({color:0x111111,roughness:0.5}), [2.5, -0.5, ductD/2+0.1], null, 'OLED Display', 'Shows live NO₂, temperature, pressure & system status locally');
-  const oledScreen = addMesh(new THREE.BoxGeometry(0.78, 0.46, 0.01), matOLED, [2.5, -0.5, ductD/2+0.12], null, null, null, scene);
+  const labelEl  = el('component-label');
+  const labelNm  = el('label-name');
+  const labelDsc = el('label-desc');
 
-  // ─ Wires using CatmullRom curves ─
-  function makeTube(points, mat, r) {
-    const curve = new THREE.CatmullRomCurve3(points.map(p => new THREE.Vector3(...p)));
-    const geo = new THREE.TubeGeometry(curve, 12, r || 0.025, 6, false);
-    const m = new THREE.Mesh(geo, mat);
-    wireGroup.add(m);
-    return m;
-  }
-  // Sensor → STM32
-  makeTube([[-2.5, -1.17, 0], [-1.5, -1.3, 0.2], [0, -1.17, 0.4]], matWireBrown);
-  // BMP180 → STM32
-  makeTube([[-1.5, -1.17, 0], [-0.7, -1.3, 0.2], [0, -1.17, 0.3]], matWireGreen);
-  // STM32 → UV lamp
-  makeTube([[0, -1.17, 0], [0, -0.5, 0.3], [0, 0.2, 0]], matWireGreen);
-  // STM32 → OLED
-  makeTube([[0.7, -1.17, 0], [1.8, -1.0, 0.4], [2.5, -0.8, 0.6]], matWireRed);
-  // Power wire
-  makeTube([[-3.2, -1.5, 0], [-2.5, -1.26, 0]], matWireRed);
+  const COMPS = [
+    { mesh: stm32,  name: 'STM32 MCU',       desc: 'ADC · I2C · GPIO · UART 115200 baud' },
+    { mesh: oled3,  name: 'OLED Display',     desc: '128×64 SSD1306 — same values as dashboard' },
+    { mesh: sensor, name: 'Gas Sensor Array', desc: 'MQ-series · ADC channels 5, 6, 7' },
+    { mesh: uvBar,  name: 'UV Lamp 365 nm',   desc: 'TiO₂ photocatalysis — GPIO relay controlled' },
+  ];
+  const meshes = COMPS.map(c => c.mesh);
+  const ray    = new THREE.Raycaster();
+  const m3     = new THREE.Vector2();
 
-  // ─ Ground plane ─
-  const groundMesh = addMesh(new THREE.BoxGeometry(12, 0.04, 8), new THREE.MeshStandardMaterial({color: 0xE0DDD6, roughness:1}), [0, -1.8, 0]);
-  groundMesh.receiveShadow = true;
-
-  // ─ Particles (3D) ─
-  const PART_COUNT = 80;
-  const partPositions = new Float32Array(PART_COUNT * 3);
-  const partColors = new Float32Array(PART_COUNT * 3);
-  const partPhases = new Float32Array(PART_COUNT);
-  const partSpeeds = new Float32Array(PART_COUNT);
-  const partY = new Float32Array(PART_COUNT);
-  const partZ = new Float32Array(PART_COUNT);
-
-  for (let i = 0; i < PART_COUNT; i++) {
-    partPhases[i] = Math.random();
-    partSpeeds[i] = 0.003 + Math.random() * 0.004;
-    partY[i] = (Math.random() - 0.5) * (ductH - 0.3);
-    partZ[i] = (Math.random() - 0.5) * (ductD - 0.3);
-  }
-
-  const partGeo = new THREE.BufferGeometry();
-  partGeo.setAttribute('position', new THREE.BufferAttribute(partPositions, 3));
-  partGeo.setAttribute('color', new THREE.BufferAttribute(partColors, 3));
-
-  const partMat = new THREE.PointsMaterial({ size: 0.07, vertexColors: true, sizeAttenuation: true });
-  const points = new THREE.Points(partGeo, partMat);
-  scene.add(points);
-
-  const colRed = new THREE.Color('#C0412A');
-  const colAmber = new THREE.Color('#B87333');
-  const colGreen = new THREE.Color('#2A6B47');
-  const tmpColor = new THREE.Color();
-
-  function updateParticles3D() {
-    const uvOn = state.uvActive;
-    for (let i = 0; i < PART_COUNT; i++) {
-      partPhases[i] += partSpeeds[i];
-      if (partPhases[i] > 1) {
-        partPhases[i] -= 1;
-        partY[i] = (Math.random() - 0.5) * (ductH - 0.3);
-        partZ[i] = (Math.random() - 0.5) * (ductD - 0.3);
-      }
-      const ph = partPhases[i];
-      const x = -ductLen/2 + ph * ductLen;
-      partPositions[i*3] = x;
-      partPositions[i*3+1] = partY[i];
-      partPositions[i*3+2] = partZ[i];
-
-      const uvS = 0.3, uvE = 0.7;
-      if (!uvOn) {
-        tmpColor.copy(colRed);
-      } else if (ph < uvS) {
-        tmpColor.copy(colRed);
-      } else if (ph < uvE) {
-        const t = (ph - uvS) / (uvE - uvS);
-        if (t < 0.5) tmpColor.lerpColors(colRed, colAmber, t*2);
-        else tmpColor.lerpColors(colAmber, colGreen, (t-0.5)*2);
-      } else {
-        tmpColor.copy(colGreen);
-      }
-      partColors[i*3] = tmpColor.r;
-      partColors[i*3+1] = tmpColor.g;
-      partColors[i*3+2] = tmpColor.b;
-    }
-    partGeo.attributes.position.needsUpdate = true;
-    partGeo.attributes.color.needsUpdate = true;
-  }
-
-  // ─ Explode positions ─
-  const basePositions = {};
-  interactable.forEach((item, idx) => {
-    basePositions[idx] = item.mesh.position.clone();
-  });
-
-  // ─ Simple orbit controls (manual) ─
-  let isDown = false, lastX = 0, lastY = 0;
-  let rotX = 0.4, rotY = 0.5;
-  let autoRotate = true;
-  let autoTimer = null;
-
-  canvas.addEventListener('mousedown', e => {
-    isDown = true; lastX = e.clientX; lastY = e.clientY;
-    autoRotate = false;
-    clearTimeout(autoTimer);
-  });
-  canvas.addEventListener('mouseup', () => {
-    isDown = false;
-    autoTimer = setTimeout(() => autoRotate = true, 3000);
-  });
   canvas.addEventListener('mousemove', e => {
-    if (!isDown) return;
-    const dx = e.clientX - lastX, dy = e.clientY - lastY;
-    rotY += dx * 0.005;
-    rotX += dy * 0.005;
-    rotX = Math.max(-Math.PI*0.4, Math.min(Math.PI*0.4, rotX));
-    lastX = e.clientX; lastY = e.clientY;
-    handleHover(e);
+    const r = canvas.getBoundingClientRect();
+    m3.x =  ((e.clientX - r.left) / r.width)  * 2 - 1;
+    m3.y = -((e.clientY - r.top)  / r.height) * 2 + 1;
+    ray.setFromCamera(m3, camera);
+    const hits = ray.intersectObjects(meshes);
+    if (hits.length && labelEl) {
+      const c = COMPS.find(x => x.mesh === hits[0].object);
+      if (c) {
+        labelNm.textContent  = c.name;
+        labelDsc.textContent = c.desc;
+        labelEl.classList.remove('hidden');
+        labelEl.style.left = (e.clientX - r.left + 14) + 'px';
+        labelEl.style.top  = (e.clientY - r.top  - 12) + 'px';
+      }
+    } else if (labelEl) labelEl.classList.add('hidden');
+  });
+  canvas.addEventListener('mouseleave', () => { if (labelEl) labelEl.classList.add('hidden'); });
+
+  let drag = false, lx = 0, ly = 0, ry = 0, rx = 0;
+  canvas.addEventListener('mousedown', e => { drag = true;  lx = e.clientX; ly = e.clientY; });
+  window.addEventListener('mouseup',   ()  => { drag = false; });
+  window.addEventListener('mousemove', e  => {
+    if (!drag) return;
+    ry += (e.clientX - lx) * 0.008;
+    rx  = Math.max(-0.7, Math.min(0.7, rx + (e.clientY - ly) * 0.008));
+    lx = e.clientX; ly = e.clientY;
   });
   canvas.addEventListener('wheel', e => {
-    camera.position.multiplyScalar(1 + e.deltaY * 0.001);
-    const d = camera.position.length();
-    camera.position.setLength(Math.max(4, Math.min(18, d)));
-  }, { passive: true });
+    camera.position.z = Math.max(3, Math.min(13, camera.position.z + e.deltaY * 0.012));
+    e.preventDefault();
+  }, { passive: false });
 
-  // Touch
-  let lastTX = 0, lastTY = 0;
-  canvas.addEventListener('touchstart', e => {
-    lastTX = e.touches[0].clientX; lastTY = e.touches[0].clientY;
-    autoRotate = false; clearTimeout(autoTimer);
-  });
-  canvas.addEventListener('touchmove', e => {
-    const dx = e.touches[0].clientX - lastTX, dy = e.touches[0].clientY - lastTY;
-    rotY += dx * 0.005; rotX += dy * 0.005;
-    rotX = Math.max(-Math.PI*0.4, Math.min(Math.PI*0.4, rotX));
-    lastTX = e.touches[0].clientX; lastTY = e.touches[0].clientY;
-  });
-  canvas.addEventListener('touchend', () => {
-    autoTimer = setTimeout(() => autoRotate = true, 3000);
+  const chkW = el('chk-wiring');
+  const chkE = el('chk-explode');
+  const chkL = el('chk-live');
+  if (chkW) chkW.addEventListener('change', () => { wireGrp.visible = chkW.checked; });
+  if (chkE) chkE.addEventListener('change', () => {
+    oled3.position.y  = -DH/2-0.50 - (chkE.checked ? 0.55 : 0);
+    sensor.position.y = -DH/2-0.50 - (chkE.checked ? 0.30 : 0);
+    uvBar.position.y  =  DH/2-T-0.035 + (chkE.checked ? 0.35 : 0);
   });
 
-  // ─ Raycasting ─
-  const raycaster = new THREE.Raycaster();
-  const mouse = new THREE.Vector2();
-  const labelEl = document.getElementById('component-label');
-  const labelName = document.getElementById('label-name');
-  const labelDesc = document.getElementById('label-desc');
-
-  function handleHover(e) {
-    if (!labelEl) return;
-    const rect = canvas.getBoundingClientRect();
-    mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
-    mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
-    raycaster.setFromCamera(mouse, camera);
-    const meshes = interactable.map(i => i.mesh);
-    const hits = raycaster.intersectObjects(meshes);
-    if (hits.length > 0) {
-      const found = interactable.find(i => i.mesh === hits[0].object);
-      if (found) {
-        labelName.textContent = found.name;
-        labelDesc.textContent = found.desc;
-        labelEl.classList.remove('hidden');
-        labelEl.style.left = (e.clientX - canvas.getBoundingClientRect().left + 12) + 'px';
-        labelEl.style.top = (e.clientY - canvas.getBoundingClientRect().top - 20) + 'px';
-        canvas.style.cursor = 'pointer';
-        return;
-      }
-    }
-    labelEl.classList.add('hidden');
-    canvas.style.cursor = 'grab';
-  }
-  canvas.addEventListener('mousemove', handleHover);
-
-  // ─ Checkboxes ─
-  const chkWire = document.getElementById('chk-wiring');
-  const chkExplode = document.getElementById('chk-explode');
-  const chkLive = document.getElementById('chk-live');
-
-  if (chkWire) chkWire.addEventListener('change', () => { wireGroup.visible = chkWire.checked; });
-
-  let explodeT = 0, explodeTarget = 0;
-  if (chkExplode) chkExplode.addEventListener('change', () => { explodeTarget = chkExplode.checked ? 1 : 0; });
-
-  // ─ Pivot for orbit ─
+  /* pivot group so rotation works on everything */
   const pivot = new THREE.Group();
-  // Move all scene children into pivot
+  const children = [...scene.children];
+  children.forEach(c => { scene.remove(c); pivot.add(c); });
   scene.add(pivot);
 
-  // ─ Animate loop ─
-  let tick3d = 0;
-  function animate() {
-    requestAnimationFrame(animate);
-    tick3d++;
-
-    if (autoRotate) rotY += 0.003;
-
-    pivot.rotation.x = rotX;
-    pivot.rotation.y = rotY;
-
-    // UV effects
-    const uvOn = state.uvActive;
-    matUV.emissiveIntensity = uvOn ? (0.6 + Math.sin(tick3d * 0.05) * 0.2) : 0;
-    uvPointLight.intensity = uvOn ? (0.5 + Math.sin(tick3d * 0.05) * 0.2) : 0;
-
-    // OLED pulse on data update
-    if (tick3d % 60 === 0) {
-      matOLED.emissiveIntensity = 0.8;
-    } else {
-      matOLED.emissiveIntensity = Math.max(0.3, matOLED.emissiveIntensity - 0.02);
+  let f = 0;
+  (function render() {
+    f++;
+    requestAnimationFrame(render);
+    if (!drag) ry += 0.003;
+    pivot.rotation.y = ry;
+    pivot.rotation.x = rx;
+    if (chkL && chkL.checked && uvBar) {
+      uvBar.material.emissiveIntensity = cur.uvActive
+        ? 0.4 + Math.sin(f * 0.07) * 0.35
+        : 0.04;
     }
-
-    // Explode
-    explodeT += (explodeTarget - explodeT) * 0.06;
-    interactable.forEach((item, idx) => {
-      const base = basePositions[idx];
-      if (!base) return;
-      const dir = base.clone().normalize();
-      item.mesh.position.lerpVectors(base, base.clone().add(dir.multiplyScalar(1.5)), explodeT);
-    });
-
-    updateParticles3D();
     renderer.render(scene, camera);
-  }
+  })();
 
-  // Move all existing children into pivot
-  const toMove = [];
-  scene.children.forEach(c => { if (c !== pivot) toMove.push(c); });
-  toMove.forEach(c => { scene.remove(c); pivot.add(c); });
-
-  // Reposition camera
-  camera.position.set(6, 4, 9);
-  camera.lookAt(pivot.position);
-
-  animate();
-
-  // Resize
   window.addEventListener('resize', () => {
-    const W2 = canvas.parentElement.clientWidth;
-    const H2 = canvas.parentElement.clientHeight || 520;
-    renderer.setSize(W2, H2);
-    camera.aspect = W2 / H2;
+    const nw2 = canvas.parentElement.clientWidth;
+    renderer.setSize(nw2, HH);
+    camera.aspect = nw2 / HH;
     camera.updateProjectionMatrix();
   });
-})();
+}
+
+/* ================================================================
+   SCROLL REVEAL — .process-stage elements
+   ================================================================ */
+function initReveal() {
+  const stages = document.querySelectorAll('.process-stage');
+  if (!stages.length) return;
+  const obs = new IntersectionObserver(entries => {
+    entries.forEach(e => {
+      if (e.isIntersecting) {
+        e.target.style.opacity   = '1';
+        e.target.style.transform = 'translateY(0)';
+      }
+    });
+  }, { threshold: 0.15 });
+  stages.forEach(s => {
+    s.style.cssText += ';opacity:0;transform:translateY(22px);transition:opacity 0.55s ease,transform 0.55s ease';
+    obs.observe(s);
+  });
+}
+
+/* ================================================================
+   BOOT
+   ================================================================ */
+document.addEventListener('DOMContentLoaded', () => {
+
+  chartsInit();      /* 1 — seed charts with 20 historical points  */
+  initParticles();   /* 2 — animated SVG particles in hero duct     */
+  initReveal();      /* 3 — scroll-triggered process stage reveal   */
+  init3D();          /* 4 — Three.js interactive 3-D schematic      */
+
+  setDot(false);     /* 5 — show "Demo mode" until WS connects      */
+  update(sim);       /* 6 — instant first paint, no blank state     */
+
+  wsConnect();       /* 7 — attempt bridge connection               */
+
+  /* 8 — tick every 2 s                                            */
+  /*     WS live  → ws.onmessage drives updates, sim is silent     */
+  /*     WS down  → sim steps and drives updates                   */
+  setInterval(() => {
+    if (!wsAlive) { simStep(); update(sim); }
+  }, 2000);
+});
